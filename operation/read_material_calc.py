@@ -13,15 +13,21 @@
 用 `source` 标明取自哪一栏，由上层按图标顺序或其它来源补名字。不在这里瞎猜名字，
 猜错会把缺口算到隔壁材料上（初阶 / 高阶 / 特化只差一个字，后果比留空更糟）。
 
-### 路径 B（备选，默认关）：养成材料计算的明细表
+### 路径 B（材料预览读不到时的备选，默认可用）：养成材料计算的明细表
 
     养成方案-详情 → 「更多方案」→ 养成指南 → 角色名下方「养成材料计算」
     → 弹窗设置页点「确定」→ 结果页「养成材料明细」四列表
 
-这条路能拿到材料名，但中间的「养成指南」页**还没有截图建档**（没有 screen_info），
-定位不到那个「养成材料计算」入口按钮。所以本文件不猜着点：找不到就 `round_fail`，
-status 里写清缺哪一页的建档。要启用这条路，先把养成指南页的 screen_info 补上，
-再把 `allow_dialog_fallback` 打开。
+这条路能拿到材料名（材料预览栏只有图标），代价是多点几下。所以默认顺序是
+「先读材料预览，读不到再走这条路」；不想要这条路就把构造参数的
+`allow_dialog_fallback` 传 False，这时材料预览读不到会直接失败，不会乱点。
+
+中间每一步都有独立节点、独立失败状态：哪个画面没到、哪个按钮没找到，都写进 status，
+不会静默跳过然后交一份空数据上去。
+
+**注意**：这条路涉及的三页（养成方案详情 / 养成指南 / 养成材料计算弹窗）里，
+养成方案详情页和养成材料计算弹窗有留档截图，养成指南页只有一张「方案概览」的截图。
+点「更多方案」「养成材料计算」「确定」这几个动作的坐标是照建档写的，**未实机验证**。
 
 ## 游戏内 10 分钟延迟（硬约束，别在这文件里做闭环）
 
@@ -78,6 +84,17 @@ AREA_GUIDE_AGENT_NAME: str = '区域-角色名'
 #: 左上角「更多方案」，也是这一页的识别锚点
 AREA_GUIDE_MORE_PLAN: str = '按钮-更多方案'
 
+#: 养成指南页（插件自带 screen_info/agent_guide.yml），从养成方案详情页点「更多方案」进来
+AGENT_GUIDE_SCREEN: str = '养成指南'
+#: 左上角标题，本页的识别锚点
+AREA_AGENT_GUIDE_TITLE: str = '标题-养成指南'
+#: 代理人名字正下方的「养成材料计算 ▶」，进材料计算弹窗的入口
+AREA_AGENT_GUIDE_CALC_BUTTON: str = '按钮-养成材料计算'
+#: 粉色横幅上的代理人名字
+AREA_AGENT_GUIDE_AGENT_NAME: str = '区域-角色名'
+#: 左上角返回按钮，回养成方案详情页（本文件暂不用，留给异常收尾）
+AREA_AGENT_GUIDE_BACK: str = '按钮-返回'
+
 #: 养成材料计算弹窗（插件自带 screen_info/material_calc_dialog.yml）
 CALC_SCREEN: str = '养成材料计算'
 #: 弹窗标题，用来判断弹窗开没开
@@ -130,6 +147,8 @@ COLUMN_MISSING: int = 3
 
 #: 节点状态：材料预览栏没读到东西，要不要再试弹窗路径
 STATUS_PREVIEW_EMPTY: str = '材料预览没读到'
+#: 节点状态：已经在养成指南页了
+STATUS_GUIDE_READY: str = '已在养成指南页'
 #: 节点状态：弹窗已经开着
 STATUS_DIALOG_OPEN: str = '弹窗已开'
 
@@ -337,7 +356,7 @@ def parse_preview_lines(
     if not item_list:
         warnings.append(
             '「材料预览」栏一行「已有/所需」都没读到。可能这一栏是空的，'
-            '也可能页面没停稳，需要重试或换弹窗路径（养成指南页未建档，见模块说明）'
+            '也可能页面没停稳，需要重试或改走弹窗路径（见模块说明）'
         )
     return item_list, warnings
 
@@ -690,6 +709,39 @@ def guide_area(ctx: ZContext, area_name: str) -> Rect | None:
     return _area(ctx, GUIDE_SCREEN, area_name)
 
 
+def agent_guide_area(ctx: ZContext, area_name: str) -> Rect | None:
+    """取养成指南页的一个区域。没配置返回 None。"""
+    return _area(ctx, AGENT_GUIDE_SCREEN, area_name)
+
+
+def read_agent_guide_name(ctx: ZContext, screen: MatLike) -> str:
+    """读养成指南页粉色横幅上的代理人名字。读不到返回空字符串。"""
+    area = agent_guide_area(ctx, AREA_AGENT_GUIDE_AGENT_NAME)
+    if area is None:
+        return ''
+    block_list = agent_plan_page.read_text_blocks(ctx, screen, area)
+    return agent_plan_page.pick_agent_name(block_list)
+
+
+def has_detail_table_header(ctx: ZContext, screen: MatLike) -> bool:
+    """明细表表头（所需 / 已有 / 仍需获取）在不在这块画面里。
+
+    只在「一行数据都没读到」时用来分辨是「结果页没出来」还是「结果页出来了但没数据」。
+
+    Args:
+        ctx: 一条龙上下文
+        screen: 游戏截图
+
+    Returns:
+        看到表头就是 True；区域没配置也算 False
+    """
+    area = calc_area(ctx, AREA_CALC_DETAIL_TABLE)
+    if area is None:
+        return False
+    block_list = agent_plan_page.read_text_blocks(ctx, screen, area)
+    return any(is_table_header(row) for row in group_rows(block_list))
+
+
 def calc_area(ctx: ZContext, area_name: str) -> Rect | None:
     """取养成材料计算弹窗的一个区域。没配置返回 None。"""
     return _area(ctx, CALC_SCREEN, area_name)
@@ -709,15 +761,18 @@ def _area(ctx: ZContext, screen_name: str, area_name: str) -> Rect | None:
 class ReadMaterialCalc(ZOperation):
     """读材料缺口。结果的 data 是 `MaterialGapSnapshot`。
 
-    默认走「材料预览」栏（路径 A）。`allow_dialog_fallback=True` 时才在预览栏读不到
-    的情况下试弹窗路径（路径 B，养成指南页未建档，基本会明确失败）。
+    顺序：先读养成方案详情页右侧的「材料预览」栏（路径 A，最省事）；
+    读不到时（且 `allow_dialog_fallback` 没关）再走
+    「更多方案 → 养成指南 → 养成材料计算 → 确定 → 明细表」（路径 B，能拿到材料名）。
+
+    导航链路的失败都是显式的：哪个画面没到、哪个按钮没找到，都写在 status 里。
     """
 
     def __init__(
         self,
         ctx: ZContext,
         goto_first: bool = True,
-        allow_dialog_fallback: bool = False,
+        allow_dialog_fallback: bool = True,
     ) -> None:
         """
         构造函数。
@@ -725,8 +780,8 @@ class ReadMaterialCalc(ZOperation):
         Args:
             ctx: 一条龙上下文
             goto_first: 调用前没在特训目标页时，是否自己先走过去
-            allow_dialog_fallback: 材料预览栏读不到时，要不要试「养成材料计算」弹窗那条路
-                （默认关：养成指南页还没建档，那条路现在走不通，会明确报失败）
+            allow_dialog_fallback: 材料预览栏读不到时，要不要走「养成指南 → 养成材料计算」
+                弹窗那条路。默认开；传 False 时读不到就直接失败，不多点几下
         """
         ZOperation.__init__(self, ctx, op_name='读取材料缺口')
 
@@ -821,7 +876,8 @@ class ReadMaterialCalc(ZOperation):
                 warnings=list(warnings),
             )
             return self.round_fail(
-                status='材料预览栏没读到任何「已有/所需」；'
+                status='材料预览栏没读到任何「已有/所需」，且 allow_dialog_fallback 关着，'
+                '不走「养成指南 → 养成材料计算」那条路；'
                 '这条路径要求页面停在养成方案-详情，且右侧「材料预览」栏有内容',
                 data=self.snapshot,
             )
@@ -831,40 +887,116 @@ class ReadMaterialCalc(ZOperation):
         return self.round_success(status=STATUS_PREVIEW_EMPTY)
 
     @node_from(from_name='读材料预览', status=STATUS_PREVIEW_EMPTY)
-    @operation_node(name='进养成指南', node_max_retry_times=3)
-    def goto_guide_page(self) -> OperationRoundResult:
-        """点「更多方案」——按画面建档，它的去向是养成指南页。"""
+    @operation_node(name='进养成指南', node_max_retry_times=5)
+    def goto_agent_guide(self) -> OperationRoundResult:
+        """从养成方案详情页点「更多方案」，进养成指南。
+
+        已经在养成指南页（或弹窗已经开着）就不重复点，直接把状态往下传。
+        找不到「更多方案」按钮、或者压根不在详情页，最后一次重试后把原因写进 status 失败。
+        """
+        if self._is_agent_guide_page():
+            return self.round_success(status=STATUS_GUIDE_READY)
         if self._is_dialog_open():
             return self.round_success(status=STATUS_DIALOG_OPEN)
-        return self.round_by_find_and_click_area(
+
+        last_retry = self.node_retry_times >= self.node_max_retry_times - 1
+        if not self._is_guide_page():
+            if last_retry:
+                return self.round_fail(
+                    status='进不了养成指南：当前不在养成方案详情页，'
+                    '没看到「更多方案」按钮（190,22-412,82）'
+                )
+            return self.round_retry(status='当前不在养成方案详情页，等一下再看', wait=1)
+
+        if last_retry:
+            return self.round_fail(
+                status='养成方案详情页上没找到「更多方案」按钮（190,22-412,82），点不进养成指南'
+            )
+        result = self.round_by_find_and_click_area(
             self.last_screenshot,
             GUIDE_SCREEN,
             AREA_GUIDE_MORE_PLAN,
             success_wait=CLICK_WAIT,
             retry_wait=1,
         )
+        if result.is_success:
+            # 换成自己的状态：点按钮成功时框架给的 status 是区域名，对不上下游那条边，
+            # 会对不上就当成「没有下一个节点」，于是带着空数据收工
+            return self.round_success(status=STATUS_GUIDE_READY)
+        return result
 
-    @node_from(from_name='进养成指南')
-    @operation_node(name='打开材料计算', node_max_retry_times=3)
+    @node_from(from_name='进养成指南', status=STATUS_GUIDE_READY)
+    @operation_node(name='确认养成指南', node_max_retry_times=5)
+    def confirm_agent_guide(self) -> OperationRoundResult:
+        """用左上角标题「养成指南」确认真的进了这一页。"""
+        if self._is_agent_guide_page():
+            guide_name = read_agent_guide_name(self.ctx, self.last_screenshot)
+            if guide_name:
+                self.agent_name = guide_name
+            return self.round_success(
+                status=f'养成指南页（{self.agent_name or "角色名没读到"}）'
+            )
+        if self.node_retry_times >= self.node_max_retry_times - 1:
+            return self.round_fail(
+                status='点了「更多方案」但没进到养成指南：左上角标题「养成指南」没找到'
+            )
+        return self.round_retry(status='还没看到养成指南标题，等一下再看', wait=1)
+
+    @node_from(from_name='进养成指南', status=STATUS_DIALOG_OPEN)
+    @node_from(from_name='确认养成指南')
+    @operation_node(name='打开材料计算', node_max_retry_times=5)
     def open_material_calc(self) -> OperationRoundResult:
-        """在养成指南页上找角色名下方的「养成材料计算」。
+        """点代理人名字正下方的「养成材料计算」，弹材料计算弹窗。
 
-        这一页还没截图建档，也就没有「养成材料计算」入口按钮的坐标。**不猜着点**：
-        找不到弹窗就明确失败，把缺哪一页的建档写进 status。
+        弹窗已经开着就不点。找不到那个入口按钮时，最后一次重试把原因写进 status。
         """
         if self._is_dialog_open():
             return self.round_success(status=STATUS_DIALOG_OPEN)
-        return self.round_fail(
-            status='找不到「养成材料计算」入口：养成指南页还没截图建档'
-            '（没有 screen_info），定位不到角色名下方那个按钮，不猜着点。'
-            '请先补该页建档并给入口按钮加区域，再把 allow_dialog_fallback 打开；'
-            '眼下请用「材料预览」栏这条路径'
+        last_retry = self.node_retry_times >= self.node_max_retry_times - 1
+        if not self._is_agent_guide_page():
+            if last_retry:
+                return self.round_fail(
+                    status='当前不在养成指南页（没看到「养成指南」标题 160,20-400,85），'
+                    '找不到材料计算入口'
+                )
+            return self.round_retry(status='当前不在养成指南页，等一下再看', wait=1)
+        if last_retry:
+            return self.round_fail(
+                status='养成指南页上没找到「养成材料计算」入口（区域 820,175-1110,235）'
+            )
+
+        result = self.round_by_find_and_click_area(
+            self.last_screenshot,
+            AGENT_GUIDE_SCREEN,
+            AREA_AGENT_GUIDE_CALC_BUTTON,
+            success_wait=CLICK_WAIT,
+            retry_wait=1,
         )
+        if result.is_success:
+            # 同上：换成自己的状态，才能走到「打开材料计算 --弹窗已开--> 确认弹窗已开」
+            return self.round_success(status=STATUS_DIALOG_OPEN)
+        return result
 
     @node_from(from_name='打开材料计算', status=STATUS_DIALOG_OPEN)
+    @operation_node(name='确认弹窗已开', node_max_retry_times=5)
+    def confirm_dialog(self) -> OperationRoundResult:
+        """用弹窗标题「养成材料计算」确认弹窗真的弹出来了。"""
+        if self._is_dialog_open():
+            return self.round_success(status=STATUS_DIALOG_OPEN)
+        if self.node_retry_times >= self.node_max_retry_times - 1:
+            return self.round_fail(
+                status='点了「养成材料计算」但弹窗没弹出来：标题「养成材料计算」没找到'
+            )
+        return self.round_retry(status='还没看到材料计算弹窗标题，等一下再看', wait=1)
+
+    @node_from(from_name='确认弹窗已开', status=STATUS_DIALOG_OPEN)
     @operation_node(name='点确定出结果', node_max_retry_times=5)
     def confirm_calc(self) -> OperationRoundResult:
         """弹窗设置页点「确定」，同一弹窗内切到结果页。"""
+        if self.node_retry_times >= self.node_max_retry_times - 1:
+            return self.round_fail(
+                status='材料计算弹窗里没找到「确定」按钮（区域 975,895-1390,980）'
+            )
         return self.round_by_find_and_click_area(
             self.last_screenshot,
             CALC_SCREEN,
@@ -876,7 +1008,11 @@ class ReadMaterialCalc(ZOperation):
     @node_from(from_name='点确定出结果')
     @operation_node(name='读明细表')
     def read_detail_table(self) -> OperationRoundResult:
-        """读结果页的四列明细表 + 「需要获取的材料」概况。"""
+        """读结果页的四列明细表 + 「需要获取的材料」概况。
+
+        一行都没读到时再分一次：看到表头说明结果页出来了、只是没数据；
+        连表头都没有说明「确定」没生效，结果页没出来。两种都明确失败，不交空数据。
+        """
         item_list, summary, warnings = read_calc_detail(self.ctx, self.last_screenshot)
         self.snapshot = MaterialGapSnapshot(
             source=SOURCE_CALC_DETAIL,
@@ -892,7 +1028,15 @@ class ReadMaterialCalc(ZOperation):
             summary.satisfied_count,
         )
         if not item_list:
-            return self.round_fail(status='明细表一行都没读到', data=self.snapshot)
+            if has_detail_table_header(self.ctx, self.last_screenshot):
+                return self.round_fail(
+                    status='明细表有表头但没有数据行：可能还没加载完，或表格需要往下滚',
+                    data=self.snapshot,
+                )
+            return self.round_fail(
+                status='点了「确定」但结果页没出来：明细表表头「所需 / 已有」没找到',
+                data=self.snapshot,
+            )
         return self.round_success(status=f'明细表读到 {len(item_list)} 行', data=self.snapshot)
 
     def _is_guide_page(self) -> bool:
@@ -901,6 +1045,14 @@ class ReadMaterialCalc(ZOperation):
             return False
         return self.round_by_find_area(
             self.last_screenshot, GUIDE_SCREEN, AREA_GUIDE_MORE_PLAN
+        ).is_success
+
+    def _is_agent_guide_page(self) -> bool:
+        """现在是不是停在养成指南页（靠左上角标题认）。"""
+        if agent_guide_area(self.ctx, AREA_AGENT_GUIDE_TITLE) is None:
+            return False
+        return self.round_by_find_area(
+            self.last_screenshot, AGENT_GUIDE_SCREEN, AREA_AGENT_GUIDE_TITLE
         ).is_success
 
     def _is_dialog_open(self) -> bool:

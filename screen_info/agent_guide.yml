@@ -1,0 +1,137 @@
+screen_id: agent_guide
+screen_name: 养成指南
+pc_alt: false
+area_list:
+# 页面锚点：左上角标题「养成指南」，只有本页面有
+- area_name: 标题-养成指南
+  id_mark: true
+  pc_rect:
+  - 160
+  - 20
+  - 400
+  - 85
+  text: 养成指南
+  lcs_percent: 0.5
+  template_sub_dir: ''
+  template_id: ''
+  template_match_threshold: 0.7
+  color_range: null
+  goto_list: []
+- area_name: 按钮-返回
+  id_mark: false
+  pc_rect:
+  - 150
+  - 20
+  - 235
+  - 85
+  text: ''
+  lcs_percent: 0.5
+  template_sub_dir: ''
+  template_id: ''
+  template_match_threshold: 0.7
+  color_range: null
+  goto_list: []
+# 顶部代理人横条：一排头像，当前选中的有黄色描边，左右各有一个箭头翻页
+- area_name: 区域-代理人横条
+  id_mark: false
+  pc_rect:
+  - 765
+  - 8
+  - 1655
+  - 92
+  text: ''
+  lcs_percent: 0.5
+  template_sub_dir: ''
+  template_id: ''
+  template_match_threshold: 0.7
+  color_range: null
+  goto_list: []
+# 粉色横幅上的代理人名字（白色粗体，前面有个 S 徽标）
+- area_name: 区域-角色名
+  id_mark: false
+  pc_rect:
+  - 755
+  - 133
+  - 945
+  - 190
+  text: ''
+  lcs_percent: 0.5
+  template_sub_dir: ''
+  template_id: ''
+  template_match_threshold: 0.7
+  color_range: null
+  goto_list: []
+# 「养成材料计算」入口，在代理人名字正下方，深色圆角条 + 右侧三角
+- area_name: 按钮-养成材料计算
+  id_mark: false
+  pc_rect:
+  - 820
+  - 175
+  - 1110
+  - 235
+  text: 养成材料计算
+  lcs_percent: 0.5
+  template_sub_dir: ''
+  template_id: ''
+  template_match_threshold: 0.7
+  color_range: null
+  goto_list: []
+# 左侧竖排导航：方案概览（选中是黄底）/ 属性&等级 / 驱动盘 / 音擎 / 技能 / 推荐队伍 / 补充建议
+- area_name: 区域-左侧导航
+  id_mark: false
+  pc_rect:
+  - 160
+  - 165
+  - 405
+  - 620
+  text: ''
+  lcs_percent: 0.5
+  template_sub_dir: ''
+  template_id: ''
+  template_match_threshold: 0.7
+  color_range: null
+  goto_list: []
+- area_name: 按钮-方案概览
+  id_mark: false
+  pc_rect:
+  - 180
+  - 175
+  - 395
+  - 245
+  text: 方案概览
+  lcs_percent: 0.5
+  template_sub_dir: ''
+  template_id: ''
+  template_match_threshold: 0.7
+  color_range: null
+  goto_list: []
+- area_name: 按钮-应用方案
+  id_mark: false
+  pc_rect:
+  - 1330
+  - 135
+  - 1520
+  - 195
+  text: 应用方案
+  lcs_percent: 0.5
+  template_sub_dir: ''
+  template_id: ''
+  template_match_threshold: 0.7
+  color_range: null
+  goto_list: []
+- area_name: 按钮-切换方案
+  id_mark: false
+  pc_rect:
+  - 1530
+  - 135
+  - 1725
+  - 195
+  text: 切换方案
+  lcs_percent: 0.5
+  template_sub_dir: ''
+  template_id: ''
+  template_match_threshold: 0.7
+  color_range: null
+  goto_list: []
+# 说明：本页是「养成方案详情」点「更多方案」进来的。这里点「养成材料计算」
+# 会弹出材料计算弹窗（screen_info/material_calc_dialog.yml），点「确定」出结果页。
