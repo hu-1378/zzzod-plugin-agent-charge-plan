@@ -115,6 +115,10 @@
   <section class="card" id="agentCard">
     <h2>要养的角色（写进 agent_charge_plan.yml 的 batch_agent_names）</h2>
     <div class="row">
+      <label class="field">运行模式<select id="selRunMode"></select></label>
+      <span id="runModeHint" class="hint">「只排计划」= 还是写进内置体力计划，由它去跑；「自己边刷边算」= 这个应用自己一轮刷一个副本，刷完记账，不再需要内置体力计划。</span>
+    </div>
+    <div class="row">
       <button id="btnAgentAll" type="button">全选</button>
       <button id="btnAgentNone" type="button">清空</button>
       <button id="btnAgentKeep" type="button">只保留已勾选</button>
@@ -155,7 +159,10 @@
     agentInfo: null,
     checkedAgents: new Set(),
     agentLoadedNames: [],
-    agentFilter: false
+    agentFilter: false,
+    // 运行模式（同一个 agent_charge_plan.yml 的 run_mode）
+    runMode: 'plan_only',
+    runModeLoaded: 'plan_only'
   };
 
   // ── DOM 小工具 ─────────────────────────────────────────────────────
@@ -519,6 +526,7 @@
       container.appendChild(buildCard(plan, index));
     });
     renderAgents();
+    renderRunMode();
     $('dirtyFlag').textContent = state.dirty ? '有未保存的修改' : '';
   }
 
@@ -546,6 +554,43 @@
       if (known.indexOf(name) >= 0) { checked.add(name); }
     });
     state.checkedAgents = checked;
+    var mode = (info && typeof info.run_mode === 'string') ? info.run_mode : 'plan_only';
+    state.runMode = mode;
+    state.runModeLoaded = mode;
+  }
+
+  // ── 运行模式（同一个 agent_charge_plan.yml 的 run_mode）──────────────────
+  function runModeOptions() {
+    var block = (state.meta && state.meta.agent_charge_plan) || {};
+    if (Array.isArray(block.run_mode_list) && block.run_mode_list.length > 0) {
+      return block.run_mode_list;
+    }
+    return [
+      { label: '只排计划（交给内置体力计划去跑）', value: 'plan_only' },
+      { label: '自己边刷边算（不再需要内置体力计划）', value: 'execute' }
+    ];
+  }
+
+  function runModeChanged() {
+    return state.runMode !== state.runModeLoaded;
+  }
+
+  function renderRunMode() {
+    var select = $('selRunMode');
+    var options = runModeOptions();
+    fillSelect(select, options, state.runMode);
+    var info = state.agentInfo;
+    select.disabled = !info || !info.exists;
+    var hint = $('runModeHint');
+    if (!info || !info.exists) {
+      hint.className = 'hint';
+      hint.textContent = '还没有 agent_charge_plan.yml —— 先在游戏里跑一次这个应用，再回来改运行模式。';
+      return;
+    }
+    hint.className = 'hint';
+    hint.textContent = state.runMode === 'execute'
+      ? '「自己边刷边算」：按 ①特训目标缺口 → ②材料库存保持 → ③保底任务 的顺序，一轮刷一个副本，最后回大世界。'
+      : '「只排计划」：只把算出来的计划写进内置体力计划的配置，实际刷本交给那个应用。';
   }
 
   function selectedAgents() {
@@ -694,10 +739,26 @@
     });
   }
 
-  /** 角色名单单独一份文件（agent_charge_plan.yml），需要另一次 POST。 */
+  /** 角色名单和运行模式在同一个文件（agent_charge_plan.yml），需要另一次 POST。 */
   function saveAgentNames(lines) {
     var info = state.agentInfo;
-    if (!info || !info.exists || knownAgents().length === 0 || !agentChanged()) {
+    if (!info || !info.exists) {
+      setDirty(false);
+      $('btnSave').disabled = false;
+      showBanner('ok', lines.join('\n'));
+      render();
+      return;
+    }
+
+    // 只提交变了的字段：角色名单要求名单非空，运行模式单独也能存
+    var data = {};
+    if (knownAgents().length > 0 && agentChanged()) {
+      data.batch_agent_names = selectedAgents();
+    }
+    if (runModeChanged()) {
+      data.run_mode = state.runMode;
+    }
+    if (Object.keys(data).length === 0) {
       setDirty(false);
       $('btnSave').disabled = false;
       showBanner('ok', lines.join('\n'));
@@ -712,13 +773,13 @@
         instance: state.instance,
         group: info.group,
         app: info.app || 'agent_charge_plan',
-        data: { batch_agent_names: selectedAgents() }
+        data: data
       })
     }).then(function (result) {
       $('btnSave').disabled = false;
       var payload = result.payload || {};
       if (!result.ok || !payload.ok) {
-        showBanner('err', '体力计划已保存，但角色名单保存失败：' + showErrors(payload) + '\n' + lines.join('\n'));
+        showBanner('err', '体力计划已保存，但角色名单/运行模式保存失败：' + showErrors(payload) + '\n' + lines.join('\n'));
         setDirty(false);
         render();
         return;
@@ -728,6 +789,8 @@
         lines.push('提示：' + payload.warnings.join('；'));
       }
       state.agentLoadedNames = selectedAgents().slice();
+      state.runModeLoaded = state.runMode;
+      if (info) { info.batch_agent_names = state.agentLoadedNames.slice(); info.run_mode = state.runMode; }
       setDirty(false);
       showBanner('ok', lines.join('\n'));
       render();
@@ -772,6 +835,7 @@
     if (agents.length > 0) {
       lines.push('要养的角色（' + agents.length + '）：' + agents.join('、'));
     }
+    lines.push('运行模式：' + (state.runMode === 'execute' ? '自己边刷边算' : '只排计划'));
     return lines.join('\n');
   }
 
@@ -824,6 +888,11 @@
       state.agentFilter = !state.agentFilter;
       $('btnAgentKeep').textContent = state.agentFilter ? '显示全部角色' : '只保留已勾选';
       renderAgents();
+    });
+    $('selRunMode').addEventListener('change', function (event) {
+      state.runMode = event.target.value;
+      setDirty(true);
+      renderRunMode();
     });
     $('btnCopy').addEventListener('click', function () {
       copyText(summaryText()).then(function () {

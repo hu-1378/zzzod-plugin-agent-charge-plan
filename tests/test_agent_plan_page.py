@@ -44,9 +44,9 @@ def test_plan_list_area_uses_fallback_constant(plan_list_rect: Rect) -> None:
     assert (plan_list_rect.x2, plan_list_rect.y2) == (1675, 975)
 
 
-def test_unknown_area_raises_key_error(bare_ctx: StubContext) -> None:
-    """既没主仓定义、也没兜底常量的区域要明确报错，而不是静默返回 0。"""
-    with pytest.raises(KeyError):
+def test_unknown_area_raises_lookup_error(bare_ctx: StubContext) -> None:
+    """yml 里没写的区域要明确报错，而不是静默返回 0 去截一张空图。"""
+    with pytest.raises(LookupError):
         screen_areas.get_area_rect(bare_ctx, screen_areas.COMPENDIUM_SCREEN, '区域-不存在')
 
 

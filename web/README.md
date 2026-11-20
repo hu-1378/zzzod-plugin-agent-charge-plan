@@ -61,6 +61,10 @@ UTF-8 中文会让它把命令行拆坏（实测会把 `python server.py` 拆成
 - 「要养的角色」区块：把 `agent_charge_plan.yml` 里 `known_agent_list`（游戏里扫出来的角色名）列成复选框，
   勾选结果写回同一个文件的 `batch_agent_names`；配「全选 / 清空 / 只保留已勾选」三个按钮；
   名单为空时给明确提示，让用户先回游戏里扫描；
+- 同一区块顶部有一个「运行模式」下拉，写回同一个文件的 `run_mode`：
+  - `plan_only`（默认）：只算计划、写进内置体力计划，实际刷本交给那个应用；
+  - `execute`：这个应用自己边跑边算边刷 —— 按「①特训目标缺口 → ②材料库存保持 → ③保底任务」
+    的优先级，一轮刷一个副本，刷完记账，没活干就换下一个角色，最后回大世界。
 - 底部：新增一条计划、保存、**复制配置摘要**（把当前计划压成几行纯文本贴给别人看，含已勾选角色）；
 - 保存成功顶部出现绿条，形如
   `已写入 config/01/one_dragon/charge_plan.yml（备份 .backup/charge_plan.20261120_221500.yml）`；
@@ -111,13 +115,18 @@ UTF-8 中文会让它把命令行拆坏（实测会把 `python server.py` 拆成
   },
   "agent_charge_plan": {
     "app": "agent_charge_plan",
+    "run_mode_list": [
+      { "label": "只排计划（交给内置体力计划去跑）", "value": "plan_only" },
+      { "label": "自己边刷边算（不再需要内置体力计划）", "value": "execute" }
+    ],
     "instances": {
       "01": {
         "group": "one_dragon",
         "exists": true,
         "rel_path": "config/01/one_dragon/agent_charge_plan.yml",
         "known_agent_list": ["安比", "妮可", "比利"],
-        "batch_agent_names": ["安比", "比利"]
+        "batch_agent_names": ["安比", "比利"],
+        "run_mode": "plan_only"
       }
     }
   }
@@ -125,8 +134,9 @@ UTF-8 中文会让它把命令行拆坏（实测会把 `python server.py` 拆成
 ```
 
 `agent_charge_plan.instances[实例号]` 是「要养的角色」区块的数据源：
-`known_agent_list` 来自游戏里的扫描，`batch_agent_names` 是本页写回的勾选结果；
-`exists=false` 表示这个实例还没有 `agent_charge_plan.yml`（页面上会提示先扫描）。
+`known_agent_list` 来自游戏里的扫描，`batch_agent_names` 是本页写回的勾选结果，
+`run_mode` 是同文件里的运行模式（只认 `plan_only` / `execute`，文件里写了别的值一律按 `plan_only`）；
+`exists=false` 表示这个实例还没有 `agent_charge_plan.yml`（页面上会提示先扫描，运行模式下拉也不给改）。
 
 注意 `label` 和 `value` 不总一样：分类「恶名狩猎」的显示名是「恶名狩猎 深度追猎」，但存进 YAML 的是 `恶名狩猎`；
 卡片数量「5张卡片」存的是 `'5'`。前端存的是 `value`。
@@ -154,15 +164,25 @@ UTF-8 中文会让它把命令行拆坏（实测会把 `python server.py` 拆成
 { "instance": "01", "group": "one_dragon", "app": "charge_plan", "data": { "plan_list": [ ... ] } }
 ```
 
-同一个接口也写角色名单（换 `app`，这是另一份文件）：
+同一个接口也写角色名单和运行模式（换 `app`，这是另一份文件）：
 
 ```json
 { "instance": "01", "group": "one_dragon", "app": "agent_charge_plan",
-  "data": { "batch_agent_names": ["安比", "比利"] } }
+  "data": { "batch_agent_names": ["安比", "比利"], "run_mode": "execute" } }
 ```
 
 `batch_agent_names` 会去空白、去重、保留顺序；不是数组 / 含非字符串 / 含空名字都会 400，
 名字不在当前 `known_agent_list` 里只在 `warnings` 里提示（不拒绝 —— 名单可能是旧扫描的）。
+
+`run_mode` 只接受 `plan_only` / `execute`，其它值直接 400（不会写一个跑不起来的模式进去）：
+
+```jsonc
+{
+  "ok": false,
+  "error": "run_mode 只能是 plan_only、execute，实际是 '乱写'",
+  "errors": [{ "index": null, "field": "run_mode", "message": "run_mode 只能是 plan_only、execute，实际是 '乱写'" }]
+}
+```
 
 写回规则：
 

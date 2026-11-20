@@ -82,8 +82,13 @@ class StubContext:
             screen_loader: 区域查找表；不传就用「主仓没有这些区域」的替身
         """
         self.ocr: OnnxOcrMatcher = ocr
+        # 区域全部来自插件自带 screen_info（实机和测试读同一份 yml）。
+        # 以前这里默认是「主仓没有这些区域」的替身，用来验证兜底坐标；
+        # 兜底已经取消，默认改成真表。
         self.screen_loader: NullScreenLoader | PluginScreenLoader = (
-            screen_loader if screen_loader is not None else NullScreenLoader()
+            screen_loader
+            if screen_loader is not None
+            else PluginScreenLoader(PLUGIN_ROOT / 'screen_info')
         )
         self.compendium_service: CompendiumService | None = compendium_service
 
@@ -204,6 +209,12 @@ def compendium_service() -> CompendiumService:
 def bare_ctx(ocr: OnnxOcrMatcher) -> StubContext:
     """只有 OCR 的上下文，给画面解析用例用（不需要副本表）。"""
     return StubContext(ocr)
+
+
+@pytest.fixture(scope='session')
+def null_area_ctx(ocr: OnnxOcrMatcher) -> StubContext:
+    """区域表为空的上下文，给「区域没配置时怎么降级」的用例用。"""
+    return StubContext(ocr, screen_loader=NullScreenLoader())
 
 
 @pytest.fixture(scope='session')

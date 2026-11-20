@@ -1,17 +1,13 @@
-"""特训目标相关画面的区域坐标。
+"""特训目标页、以及滚动操作的共用入口。
 
-## 为什么坐标写在这里，而不是主仓的 screen_info
+## 区域定义在哪
 
-这些区域（角色名、查看攻略、更换特训目标、清单区、左侧分类）本该加进主仓
-`assets/game_data/screen_info/compendium.yml`。但改主仓要走 PR 评审流程，
-本插件选择**完全不动主仓**，把需要的坐标写成本文件的常量。
+区域坐标写在插件自己的 `screen_info/compendium_agent_plan.yml` 里（画面名
+`快捷手册-特训目标`），按项目规范「截图区域在 yml 里声明，不硬编码在 Python 中」。
 
-## 取值顺序
-
-先问主仓的 `screen_loader`：如果以后这些区域合进了主仓，自动用主仓的（更准）。
-取不到再用本文件的兜底值。
-
-区域名故意起得和主仓风格一致，方便以后整体搬进 `compendium.yml`。
+不直接加进主仓的 `compendium.yml` 是因为：主仓已经有 `screen_name=快捷手册` 这个画面，
+`screen_loader` 遇到重名会跳过后注册的那个，插件覆盖不了它。所以用全局唯一的画面名
+单独注册一份。页面导航仍然走主仓的 `快捷手册-训练` 画面路线。
 """
 
 from typing import TYPE_CHECKING
@@ -23,9 +19,9 @@ if TYPE_CHECKING:
     from zzz_od.context.zzz_context import ZContext
 
 
-#: 画面对应主仓 `assets/game_data/screen_info/compendium.yml` 的 screen_name
-COMPENDIUM_SCREEN: str = '快捷手册'
-#: 训练 TAB 对应的画面（主仓 `compendium_training.yml` 的 screen_name），特训目标页在这个 TAB 下
+#: 插件自己注册的画面名（区域容器，不参与 goto 导航）
+COMPENDIUM_SCREEN: str = '快捷手册-特训目标'
+#: 主仓的画面名，导航时用它
 COMPENDIUM_TRAINING_SCREEN: str = '快捷手册-训练'
 
 #: 训练 TAB 左侧分类里「特训目标」那一格（选中时是蓝底）
@@ -39,20 +35,9 @@ AREA_CHANGE_TARGET: str = '按钮-更换特训目标'
 #: 主区整块条目列表（一次 OCR 后按 y 聚成行）
 AREA_PLAN_LIST: str = '区域-特训目标清单'
 
-#: 兜底坐标，格式 (left, top, right, bottom)，基准 1920x1080
-_FALLBACK_RECT: dict[str, tuple[int, int, int, int]] = {
-    AREA_LEFT_CAT_TARGET: (164, 325, 429, 432),
-    AREA_AGENT_NAME: (500, 265, 860, 350),
-    AREA_VIEW_GUIDE: (940, 315, 1240, 390),
-    AREA_CHANGE_TARGET: (1235, 310, 1580, 395),
-    AREA_PLAN_LIST: (470, 410, 1675, 975),
-}
-
 
 def get_area_rect(ctx: 'ZContext', screen_name: str, area_name: str) -> Rect:
     """取一个区域的矩形。
-
-    主仓 screen_info 里定义了就用主仓的，否则用本文件的兜底坐标。
 
     Args:
         ctx: 一条龙上下文，用来访问 screen_loader
@@ -63,17 +48,15 @@ def get_area_rect(ctx: 'ZContext', screen_name: str, area_name: str) -> Rect:
         区域矩形
 
     Raises:
-        KeyError: 主仓没有该区域，本文件也没有兜底坐标
+        LookupError: 画面对应的 yml 没加载到，或者 yml 里没写这个区域
     """
     area = ctx.screen_loader.get_area(screen_name, area_name)
-    if area is not None:
-        return area.rect
-
-    fallback = _FALLBACK_RECT.get(area_name)
-    if fallback is None:
-        raise KeyError(f'没有为 {screen_name}.{area_name} 准备兜底坐标')
-    left, top, right, bottom = fallback
-    return Rect(left, top, right, bottom)
+    if area is None:
+        raise LookupError(
+            f'取不到区域 {screen_name}.{area_name}：'
+            f'插件的 screen_info 没加载到，或者 yml 里漏了这个区域'
+        )
+    return area.rect
 
 
 def scroll_rect(
@@ -87,8 +70,7 @@ def scroll_rect(
     """在一个矩形范围内按住拖动来滚动。
 
     算法和参数含义照搬项目标准的 `one_dragon.base.screen.screen_utils.scroll_area`，
-    区别只是这里接受 `Rect` 而不是 `ScreenArea`——特训目标页的清单区可能是本文件里的
-    兜底坐标，没有对应的 ScreenArea 对象。
+    区别只是这里接受 `Rect` 而不是 `ScreenArea`（有些调用点手里只有矩形）。
 
     Args:
         ctx: 一条龙上下文

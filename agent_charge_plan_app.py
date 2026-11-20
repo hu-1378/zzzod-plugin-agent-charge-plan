@@ -1,11 +1,16 @@
 """特训目标体力计划的应用本体。
 
-做的事情：进游戏 → 到「快捷手册-训练-特训目标」页 → 读游戏算好的养成缺口 →
-翻译成内置体力计划的计划项写进去。执行仍然交给内置「体力计划」应用。
+两种运行模式（配置 `run_mode`）：
 
-不改主仓任何代码：写配置走 `run_context.get_config('charge_plan', ...)` 拿同一个实例。
+- `plan_only`（默认）：进游戏 → 到「快捷手册-训练-特训目标」页 → 读游戏算好的养成缺口 →
+  翻译成内置体力计划的计划项写进去。执行仍然交给内置「体力计划」应用。
+- `execute`：自己边跑边算边刷。读完清单和电量后一轮刷一个副本，刷完记账，
+  下一轮重新按 ①特训目标缺口 → ②材料库存保持 → ③保底任务 的优先级挑活。
 
-三种目标模式（配置 `goal_mode`）：
+不改主仓任何代码：写配置走 `run_context.get_config('charge_plan', ...)` 拿同一个实例，
+刷副本走主仓那几个公开的副本 Operation。
+
+三种目标模式（配置 `goal_mode`，只在 `plan_only` 下起作用）：
 
 - `agent_stage`：按角色养成缺口排计划
 - `material_floor`：按材料库存下限排计划（缺口从「养成材料计算」的明细表读，要配 `material_goals`）
@@ -30,6 +35,7 @@ from .agent_charge_plan_config import (
     GOAL_MODE_AGENT_STAGE,
     GOAL_MODE_BOTH,
     GOAL_MODE_MATERIAL_FLOOR,
+    RUN_MODE_EXECUTE,
     AgentChargePlanConfig,
 )
 from .operation.agent_plan_page import (
@@ -38,6 +44,7 @@ from .operation.agent_plan_page import (
     read_agent_name,
 )
 from .operation.change_agent_plan_target import ChangeAgentPlanTarget
+from .operation.execute_charge_plan import ExecuteChargePlan, ExecuteReport
 from .operation.goto_agent_plan import GotoAgentPlan
 from .operation.read_agent_plan_list import ReadAgentPlanList
 from .operation.read_material_calc import MaterialGapSnapshot, ReadMaterialCalc
@@ -108,12 +115,15 @@ class AgentChargePlanApp(ZApplication):
         self.backup_charge_power: int = 0
         #: 以太电池颗数
         self.ether_battery: int = 0
+        #: 边刷边算模式下的可用电量（进「循环刷本」前读一次）
+        self.execute_availability: ChargeAvailability = ChargeAvailability()
 
     @operation_node(name='开始', is_start_node=True)
     def start(self) -> OperationRoundResult:
         """先看配置，决定后面走哪条路。"""
         log.info(
-            '特训目标体力计划开始：目标模式 %s，预览模式 %s，指定代理人「%s」，批量 %d 个，扫描模式 %s',
+            '特训目标体力计划开始：运行模式 %s，目标模式 %s，预览模式 %s，指定代理人「%s」，批量 %d 个，扫描模式 %s',
+            self.config.run_mode,
             self.config.goal_mode,
             self.config.dry_run,
             self.config.target_agent_name or '按游戏当前设置',
@@ -122,6 +132,8 @@ class AgentChargePlanApp(ZApplication):
         )
         if self.config.scan_only:
             return self.round_success('扫描代理人名单')
+        if self.config.run_mode == RUN_MODE_EXECUTE:
+            return self.round_success('边刷边算')
         if self.config.goal_mode == GOAL_MODE_MATERIAL_FLOOR:
             return self.round_success('只处理材料库存')
         return self.round_success('读取特训目标')
@@ -393,16 +405,78 @@ class AgentChargePlanApp(ZApplication):
 
         return self.round_success(f'计划项 {len(write_result.plan_list)} 条')
 
-    @node_from(from_name='生成并写入计划')
-    @node_from(from_name='生成并写入计划', success=False)
-    @node_from(from_name='扫描代理人名单')
-    @node_from(from_name='扫描代理人名单', success=False)
+    @node_from(from_name='循环刷本')
+    @node_from(from_name='循环刷本', success=False)
     @node_notify(when=NotifyTiming.CURRENT_DONE, detail=True)
     @operation_node(name='返回大世界')
     def back_to_world(self) -> OperationRoundResult:
         """回大世界，结束。"""
         op = BackToNormalWorld(self.ctx)
         return self.round_by_op_result(op.execute())
+
+    # ── 边刷边算（run_mode = execute）─────────────────────────────────────
+    @node_from(from_name='开始', status='边刷边算')
+    @operation_node(name='执行前准备')
+    def prepare_execute(self) -> OperationRoundResult:
+        """先进快捷手册，再读一次资源栏的电量，作为这一轮的「总预算」。"""
+        goto_result = GotoAgentPlan(self.ctx).execute()
+        if not goto_result.success:
+            return self.round_by_op_result(goto_result)
+
+        self.execute_availability = self._read_charge_availability()
+        log.info(
+            '边刷边算开始：可用电量 %s（自然 %s + 储蓄 %s + 以太电池 %s 颗）',
+            self.execute_availability.total,
+            self.execute_availability.natural,
+            self.execute_availability.backup,
+            self.execute_availability.ether_battery,
+        )
+        return self.round_success(status=f'可用电量 {self.execute_availability.total}')
+
+    @node_from(from_name='执行前准备')
+    @operation_node(name='循环刷本', node_max_retry_times=1)
+    def run_execute(self) -> OperationRoundResult:
+        """边刷边算的主体：挑任务 → 传送 → 刷 → 记账，直到没活干或者电量用完。"""
+        op = ExecuteChargePlan(
+            self.ctx,
+            config=self.config,
+            availability=self.execute_availability,
+        )
+        result = op.execute()
+        if isinstance(result.data, ExecuteReport):
+            for line in result.data.summary_lines():
+                log.info(line)
+        return self.round_by_op_result(result)
+
+    def _read_charge_availability(self) -> ChargeAvailability:
+        """读一次快捷手册资源栏的电量，打包成「这一轮能用多少电量」。
+
+        为什么不直接调 `read_charge` 节点：那是 `plan_only` 链路上的节点，
+        节点方法也不能在别处当普通函数调。这里只多写几行流水线调用，
+        解析仍然复用主仓那个静态方法，不重复写一份算法。
+
+        Returns:
+            可用电量；识别失败时按自然电量上限保守估
+        """
+        try:
+            pipeline_ctx = self.ctx.cv_service.run_pipeline('电量检测', self.last_screenshot)
+            battery, backup, ether = ChargePlanApp._parse_battery_charge_ocr(
+                pipeline_ctx.ocr_result
+            )
+        except Exception:
+            log.warning(
+                '电量识别失败，按自然电量上限 %s 处理', self.DEFAULT_NATURAL_CHARGE, exc_info=True
+            )
+            return ChargeAvailability(natural=self.DEFAULT_NATURAL_CHARGE)
+
+        if battery <= 0:
+            log.warning(
+                '电量识别结果是 0（多半是识别失败），按自然电量上限 %s 处理',
+                self.DEFAULT_NATURAL_CHARGE,
+            )
+            battery = self.DEFAULT_NATURAL_CHARGE
+
+        return ChargeAvailability(natural=battery, backup=backup, ether_battery=ether)
 
     def _build_material_snapshot(self) -> PlanSnapshot | None:
         """把「材料保持到 N」换算成计划条目。

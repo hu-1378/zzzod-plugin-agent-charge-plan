@@ -1,0 +1,82 @@
+screen_id: compendium_agent_plan
+screen_name: 快捷手册-特训目标
+pc_alt: false
+area_list:
+# 这个画面是插件自己的「区域容器」，不参与 goto 路线导航。
+#
+# 为什么不直接加进主仓的 `compendium.yml`：
+# 主仓已经有 `screen_name=快捷手册` 这个画面了，`screen_loader` 遇到重名会跳过后注册的那个，
+# 插件覆盖不了。所以这里用全局唯一的 `快捷手册-特训目标` 单独注册一份区域定义，
+# 页面导航仍然走主仓的 `快捷手册-训练` 路线。
+- area_name: 区域-分类-特训目标
+  id_mark: false
+  pc_rect:
+  - 164
+  - 325
+  - 429
+  - 432
+  text: 特训目标
+  lcs_percent: 0.5
+  template_sub_dir: ''
+  template_id: ''
+  template_match_threshold: 0.7
+  color_range: null
+  goto_list: []
+- area_name: 区域-特训目标角色名
+  id_mark: false
+  pc_rect:
+  - 500
+  - 265
+  - 860
+  - 350
+  text: ''
+  lcs_percent: 0.5
+  template_sub_dir: ''
+  template_id: ''
+  template_match_threshold: 0.7
+  color_range: null
+  goto_list: []
+- area_name: 按钮-查看攻略
+  id_mark: false
+  pc_rect:
+  - 940
+  - 315
+  - 1240
+  - 390
+  text: 查看攻略
+  lcs_percent: 0.5
+  template_sub_dir: ''
+  template_id: ''
+  template_match_threshold: 0.7
+  color_range: null
+  goto_list: []
+- area_name: 按钮-更换特训目标
+  id_mark: false
+  pc_rect:
+  - 1235
+  - 310
+  - 1580
+  - 395
+  text: 更换特训目标
+  lcs_percent: 0.5
+  template_sub_dir: ''
+  template_id: ''
+  template_match_threshold: 0.7
+  color_range: null
+  goto_list: []
+# 整块滚动区，一次 OCR 后按 y 分组成行：
+# 分组标题（代理人 / 技能 / 驱动盘 …）、条目名、右侧电量、条目内进度（拥有/需求）
+- area_name: 区域-特训目标清单
+  id_mark: false
+  pc_rect:
+  - 470
+  - 410
+  - 1675
+  - 975
+  text: ''
+  lcs_percent: 0.5
+  template_sub_dir: ''
+  template_id: ''
+  template_match_threshold: 0.7
+  color_range: null
+  goto_list: []

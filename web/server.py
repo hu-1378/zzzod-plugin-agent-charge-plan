@@ -65,6 +65,19 @@ AGENT_APP_ID: str = 'agent_charge_plan'
 ONE_DRAGON_GROUP: str = 'one_dragon'
 #: agent_charge_plan.yml 里「要养的角色」那个键
 AGENT_NAMES_FIELD: str = 'batch_agent_names'
+#: agent_charge_plan.yml 里「运行模式」那个键
+RUN_MODE_FIELD: str = 'run_mode'
+#: 运行模式默认值：只排计划（和插件的默认行为一致）
+RUN_MODE_PLAN_ONLY: str = 'plan_only'
+#: 运行模式：自己边跑边算边刷
+RUN_MODE_EXECUTE: str = 'execute'
+#: 运行模式可选值。顺序就是下拉框里的顺序
+RUN_MODE_LIST: tuple[str, ...] = (RUN_MODE_PLAN_ONLY, RUN_MODE_EXECUTE)
+#: 运行模式在页面上显示的文字
+RUN_MODE_LABEL_MAP: dict[str, str] = {
+    RUN_MODE_PLAN_ONLY: '只排计划（交给内置体力计划去跑）',
+    RUN_MODE_EXECUTE: '自己边刷边算（不再需要内置体力计划）',
+}
 
 _INSTANCE_RE = re.compile(r'^\d{1,3}$')
 _APP_RE = re.compile(r'^[A-Za-z0-9_-]+$')
@@ -230,9 +243,10 @@ class ChargePlanStore:
         }
 
     def agent_meta(self, instances: list[str], groups: dict[str, list[str]]) -> dict[str, Any]:
-        """`agent_charge_plan.yml` 里的角色名单（扫描结果 + 已勾选），按实例分开返回。
+        """`agent_charge_plan.yml` 里的角色名单和运行模式，按实例分开返回。
 
-        角色名单是插件在游戏里扫出来的，本页只负责展示和写回 `batch_agent_names`。
+        角色名单是插件在游戏里扫出来的，本页只负责展示和写回 `batch_agent_names`；
+        运行模式（`run_mode`）也在同一个文件里，顺带一起读出来给下拉框用。
         """
         per_instance: dict[str, dict[str, Any]] = {}
         for instance in instances:
@@ -244,15 +258,18 @@ class ChargePlanStore:
                     'rel_path': f'config/{instance}/{group}/{AGENT_APP_ID}.yml',
                     'known_agent_list': [],
                     'batch_agent_names': [],
+                    'run_mode': RUN_MODE_PLAN_ONLY,
                 }
                 continue
             known: list[str] = []
             batch: list[str] = []
+            run_mode: str = RUN_MODE_PLAN_ONLY
             error = ''
             try:
                 data = self.load_yaml(path)
                 known = self.clean_agent_names(data.get('known_agent_list'))
                 batch = self.clean_agent_names(data.get('batch_agent_names'))
+                run_mode = self.clean_run_mode(data.get(RUN_MODE_FIELD))
             except (OSError, ValueError, yaml.YAMLError) as exc:
                 error = f'读取 {self.relative_path(path)} 失败: {exc}'
             entry: dict[str, Any] = {
@@ -261,12 +278,20 @@ class ChargePlanStore:
                 'rel_path': self.relative_path(path),
                 'known_agent_list': known,
                 'batch_agent_names': batch,
+                'run_mode': run_mode,
             }
             if error:
                 entry['error'] = error
             per_instance[instance] = entry
 
-        return {'app': AGENT_APP_ID, 'instances': per_instance}
+        return {
+            'app': AGENT_APP_ID,
+            'run_mode_list': [
+                {'label': RUN_MODE_LABEL_MAP.get(value, value), 'value': value}
+                for value in RUN_MODE_LIST
+            ],
+            'instances': per_instance,
+        }
 
     def find_app_path(
         self, instance: str, app: str, group_names: list[str]
@@ -399,8 +424,10 @@ class ChargePlanStore:
                     f'这些角色不在当前 known_agent_list 里，仍按勾选结果写入：{"、".join(unknown)}'
                 )
             merged['batch_agent_names'] = batch_names
+        if RUN_MODE_FIELD in data:
+            merged[RUN_MODE_FIELD] = self.validate_run_mode(data[RUN_MODE_FIELD])
         for key, value in data.items():
-            if key in ('plan_list', 'batch_agent_names'):
+            if key in ('plan_list', AGENT_NAMES_FIELD, RUN_MODE_FIELD):
                 continue
             merged[key] = value
 
@@ -425,9 +452,11 @@ class ChargePlanStore:
         }
         if 'batch_agent_names' in merged:
             result['batch_agent_names'] = merged['batch_agent_names']
+        if RUN_MODE_FIELD in merged:
+            result['run_mode'] = merged[RUN_MODE_FIELD]
         return result
 
-    # ── 角色名单（agent_charge_plan.yml）──────────────────────────────────
+    # ── 角色名单 / 运行模式（agent_charge_plan.yml）──────────────────────────
     @staticmethod
     def clean_agent_names(raw: Any) -> list[str]:
         """把 YAML 里读到的名字列表洗成干净的字符串列表（去空、去重、保留顺序）。"""
@@ -483,6 +512,28 @@ class ChargePlanStore:
         if errors:
             raise ConfigValidationError(errors)
         return names
+
+    @staticmethod
+    def clean_run_mode(raw: Any) -> str:
+        """把 YAML 里读到的运行模式洗成两个合法值之一；不认识的一律按默认。"""
+        if isinstance(raw, str) and raw.strip() in RUN_MODE_LIST:
+            return raw.strip()
+        return RUN_MODE_PLAN_ONLY
+
+    def validate_run_mode(self, raw: Any) -> str:
+        """校验 ``run_mode``；不合规直接抛 ConfigValidationError，绝不写个跑不起来的模式进去。"""
+        if not isinstance(raw, str) or raw.strip() not in RUN_MODE_LIST:
+            allowed = '、'.join(RUN_MODE_LIST)
+            raise ConfigValidationError(
+                [
+                    {
+                        'index': None,
+                        'field': RUN_MODE_FIELD,
+                        'message': f'{RUN_MODE_FIELD} 只能是 {allowed}，实际是 {raw!r}',
+                    }
+                ]
+            )
+        return raw.strip()
 
     # ── 校验 ────────────────────────────────────────────────────────────
     def validate_plan_list(self, raw: Any) -> tuple[list[dict[str, Any]], list[str]]:

@@ -7,8 +7,9 @@ APP_ID 必须和插件目录名、plugin.json 的 id 一致；APP_NAME 必须和
 APP_ID = "agent_charge_plan"
 APP_NAME = "特训目标体力计划"
 
-# 不进一条龙默认列表，只在应用列表里单独选。
-DEFAULT_GROUP = False
+# 进一条龙的默认应用组：可以在「一条龙」里按顺序和其他应用一起跑。
+# 想单独跑的时候，应用列表里也能直接选它。
+DEFAULT_GROUP = True
 
 # 跑完要发通知。
 NEED_NOTIFY = True

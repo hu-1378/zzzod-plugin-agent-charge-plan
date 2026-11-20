@@ -198,19 +198,19 @@ def test_calc_detail_not_ready(plugin_ctx: StubContext, calc_setting_screen: obj
 
 
 def test_read_guide_preview_without_area(
-    bare_ctx: StubContext, guide_screen: object
+    null_area_ctx: StubContext, guide_screen: object
 ) -> None:
     """主仓/插件都没配区域时返回空列表 + 提示，不抛异常。"""
-    item_list, warnings = rmc.read_guide_preview(bare_ctx, guide_screen)
+    item_list, warnings = rmc.read_guide_preview(null_area_ctx, guide_screen)
     assert item_list == []
     assert any('区域没配置' in warning for warning in warnings)
 
 
 def test_read_calc_detail_without_area(
-    bare_ctx: StubContext, calc_result_screen: object
+    null_area_ctx: StubContext, calc_result_screen: object
 ) -> None:
     """明细表相关区域全缺时，一次把缺的区域都列出来。"""
-    item_list, summary, warnings = rmc.read_calc_detail(bare_ctx, calc_result_screen)
+    item_list, summary, warnings = rmc.read_calc_detail(null_area_ctx, calc_result_screen)
     assert item_list == []
     assert summary == rmc.NeedIconSummary()
     assert any('缺少区域配置' in warning for warning in warnings)
@@ -438,10 +438,10 @@ def test_agent_guide_area_unknown(plugin_ctx: StubContext) -> None:
     assert rmc.agent_guide_area(plugin_ctx, '区域-不存在') is None
 
 
-def test_agent_guide_area_without_screen_info(bare_ctx: StubContext) -> None:
+def test_agent_guide_area_without_screen_info(null_area_ctx: StubContext) -> None:
     """主仓/插件都没这个画面的区域时，取区域和读名字都安全返回空。"""
-    assert rmc.agent_guide_area(bare_ctx, rmc.AREA_AGENT_GUIDE_TITLE) is None
-    assert rmc.read_agent_guide_name(bare_ctx, None) == ''
+    assert rmc.agent_guide_area(null_area_ctx, rmc.AREA_AGENT_GUIDE_TITLE) is None
+    assert rmc.read_agent_guide_name(null_area_ctx, None) == ''
 
 
 def test_read_agent_guide_name(plugin_ctx: StubContext, agent_guide_screen: object) -> None:
@@ -512,9 +512,9 @@ def test_has_detail_table_header_on_setting(
     assert rmc.has_detail_table_header(plugin_ctx, calc_setting_screen) is False
 
 
-def test_has_detail_table_header_without_area(bare_ctx: StubContext) -> None:
+def test_has_detail_table_header_without_area(null_area_ctx: StubContext) -> None:
     """区域没配置时判 False，不抛异常。"""
-    assert rmc.has_detail_table_header(bare_ctx, None) is False
+    assert rmc.has_detail_table_header(null_area_ctx, None) is False
 
 
 # ============================= 弹窗兜底开关的默认值 =============================
