@@ -72,6 +72,19 @@
     padding: 10px 20px; background: #fff; border-top: 1px solid var(--line); }
   .actions .grow { flex: 1; }
   .empty { color: var(--muted); padding: 12px 0; }
+  .agent-hint { margin: 8px 0 0; color: var(--warn-line); }
+  .agent-hint.ok { color: var(--muted); }
+  .agent-note { margin-top: 8px; }
+  .agent-grid { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 10px; }
+  .agent-item {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 3px 9px; border: 1px solid var(--line); border-radius: 999px;
+    background: #fbfcfd; cursor: pointer; user-select: none;
+  }
+  .agent-item:hover { border-color: var(--accent); }
+  .agent-item.on { background: #eaf1fe; border-color: var(--accent); color: #1f4fbf; font-weight: 600; }
+  .agent-item input { margin: 0; }
+  .agent-empty { color: var(--muted); }
 </style>
 </head>
 <body>
@@ -99,6 +112,19 @@
     </div>
   </section>
 
+  <section class="card" id="agentCard">
+    <h2>要养的角色（写进 agent_charge_plan.yml 的 batch_agent_names）</h2>
+    <div class="row">
+      <button id="btnAgentAll" type="button">全选</button>
+      <button id="btnAgentNone" type="button">清空</button>
+      <button id="btnAgentKeep" type="button">只保留已勾选</button>
+      <span id="agentCount" class="hint"></span>
+    </div>
+    <div id="agentHint" class="hint agent-hint"></div>
+    <div id="agentList" class="agent-grid"></div>
+    <div class="hint agent-note">角色名单是游戏里「扫描代理人列表」写进来的，本页只负责勾选和保存；勾完和体力计划一起点下面的保存。</div>
+  </section>
+
   <section id="planList"></section>
 
   <div class="actions">
@@ -124,7 +150,12 @@
     relPath: '',
     data: null,
     dirty: false,
-    errors: new Map()
+    errors: new Map(),
+    // 角色多选：info 来自 meta.agent_charge_plan.instances[实例号]
+    agentInfo: null,
+    checkedAgents: new Set(),
+    agentLoadedNames: [],
+    agentFilter: false
   };
 
   // ── DOM 小工具 ─────────────────────────────────────────────────────
@@ -267,6 +298,7 @@
       state.relPath = payload.rel_path || '';
       state.errors = new Map();
       state.dirty = false;
+      loadAgentState();
       $('pathText').textContent = state.path || '（未知）';
       render();
       showBanner('', '');
@@ -486,7 +518,142 @@
     list.forEach(function (plan, index) {
       container.appendChild(buildCard(plan, index));
     });
+    renderAgents();
     $('dirtyFlag').textContent = state.dirty ? '有未保存的修改' : '';
+  }
+
+  // ── 要养的角色（agent_charge_plan.yml 的 known_agent_list / batch_agent_names）──
+  function agentMeta() {
+    var all = (state.meta && state.meta.agent_charge_plan && state.meta.agent_charge_plan.instances) || {};
+    return all[state.instance] || null;
+  }
+
+  function knownAgents() {
+    var info = state.agentInfo;
+    if (!info || !Array.isArray(info.known_agent_list)) { return []; }
+    return info.known_agent_list;
+  }
+
+  function loadAgentState() {
+    var info = agentMeta();
+    state.agentInfo = info;
+    state.agentFilter = false;
+    var saved = (info && Array.isArray(info.batch_agent_names)) ? info.batch_agent_names : [];
+    state.agentLoadedNames = saved.slice();
+    var known = (info && Array.isArray(info.known_agent_list)) ? info.known_agent_list : [];
+    var checked = new Set();
+    saved.forEach(function (name) {
+      if (known.indexOf(name) >= 0) { checked.add(name); }
+    });
+    state.checkedAgents = checked;
+  }
+
+  function selectedAgents() {
+    return knownAgents().filter(function (name) { return state.checkedAgents.has(name); });
+  }
+
+  function toggleAgent(name, on) {
+    if (on) { state.checkedAgents.add(name); } else { state.checkedAgents.delete(name); }
+    setDirty(true);
+    // 过滤状态下取消勾选会让这一项从列表里消失，只能整块重画；否则只改样式，
+    // 避免每点一次就把所有复选框重建一遍（连续点选时容易点空）。
+    if (state.agentFilter) { renderAgents(); } else { syncAgentUi(); }
+  }
+
+  /** 只同步勾选样式与计数，不动 DOM 结构。 */
+  function syncAgentUi() {
+    var known = knownAgents();
+    Array.prototype.forEach.call(
+      document.querySelectorAll('#agentList .agent-item'),
+      function (label) {
+        var span = label.querySelector('span');
+        var name = span ? span.textContent : '';
+        var on = state.checkedAgents.has(name);
+        label.className = 'agent-item' + (on ? ' on' : '');
+        var box = label.querySelector('input');
+        if (box) { box.checked = on; }
+      }
+    );
+    if (known.length > 0) {
+      var hint = $('agentHint');
+      hint.className = 'hint agent-hint ok';
+      hint.textContent = '共扫描到 ' + known.length + ' 个角色，已勾选 ' +
+        selectedAgents().length + ' 个。';
+    }
+  }
+
+  function renderAgents() {
+    var info = state.agentInfo;
+    var hint = $('agentHint');
+    var grid = $('agentList');
+    var known = knownAgents();
+    grid.textContent = '';
+
+    if (!info) {
+      hint.className = 'hint agent-hint';
+      hint.textContent = '读不到 agent_charge_plan.yml（当前实例可能还没有这个应用的配置）。';
+      $('agentCount').textContent = '';
+      return;
+    }
+    if (!info.exists) {
+      hint.className = 'hint agent-hint';
+      hint.textContent = '还没有 ' + (info.rel_path || 'agent_charge_plan.yml') +
+        ' —— 先在游戏里跑一次「扫描代理人列表」，再回来勾选。';
+      $('agentCount').textContent = '';
+      return;
+    }
+    if (info.error) {
+      hint.className = 'hint agent-hint';
+      hint.textContent = info.error;
+      $('agentCount').textContent = '';
+      return;
+    }
+    if (known.length === 0) {
+      hint.className = 'hint agent-hint';
+      hint.textContent = '角色列表还是空的 —— 先在游戏里跑一次「扫描代理人列表」，再回来勾选';
+      $('agentCount').textContent = '';
+      return;
+    }
+
+    hint.className = 'hint agent-hint ok';
+    hint.textContent = '共扫描到 ' + known.length + ' 个角色，已勾选 ' +
+      selectedAgents().length + ' 个。' +
+      (state.agentFilter ? '（当前只显示已勾选，点「显示全部角色」恢复）' : '');
+    $('agentCount').textContent = '';
+
+    var visible = state.agentFilter
+      ? known.filter(function (name) { return state.checkedAgents.has(name); })
+      : known;
+    if (visible.length === 0) {
+      grid.appendChild(el('span', {
+        class: 'agent-empty',
+        text: state.agentFilter
+          ? '（当前只显示已勾选，但一个都没勾选；点上面的「显示全部角色」恢复）'
+          : '（一个都没勾选）'
+      }));
+      return;
+    }
+    visible.forEach(function (name) {
+      var on = state.checkedAgents.has(name);
+      var box = el('input', { type: 'checkbox', onchange: function (event) { toggleAgent(name, event.target.checked); } });
+      box.checked = on;
+      grid.appendChild(el('label', { class: 'agent-item' + (on ? ' on' : '') }, [
+        box,
+        el('span', { text: name })
+      ]));
+    });
+  }
+
+  function agentChanged() {
+    var now = selectedAgents();
+    var before = state.agentLoadedNames.filter(function (name) {
+      return knownAgents().indexOf(name) >= 0;
+    });
+    if (now.length !== before.length) { return true; }
+    for (var i = 0; i < now.length; i += 1) {
+      if (now[i] !== before[i]) { return true; }
+    }
+    return false;
   }
 
   // ── 保存 ───────────────────────────────────────────────────────────
@@ -506,9 +673,9 @@
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
     }).then(function (result) {
-      $('btnSave').disabled = false;
       var payload = result.payload || {};
       if (!result.ok || !payload.ok) {
+        $('btnSave').disabled = false;
         (payload.errors || []).forEach(function (item) {
           if (item.index !== null && item.index !== undefined) { state.errors.set(item.index, item.message); }
         });
@@ -519,12 +686,50 @@
       state.path = payload.path || state.path;
       state.relPath = payload.rel_path || state.relPath;
       $('pathText').textContent = state.path;
-      setDirty(false);
-      var text = payload.message || '保存成功';
+      var lines = [payload.message || '保存成功'];
       if (payload.warnings && payload.warnings.length > 0) {
-        text += '\n提示：' + payload.warnings.join('；');
+        lines.push('提示：' + payload.warnings.join('；'));
       }
-      showBanner('ok', text);
+      saveAgentNames(lines);
+    });
+  }
+
+  /** 角色名单单独一份文件（agent_charge_plan.yml），需要另一次 POST。 */
+  function saveAgentNames(lines) {
+    var info = state.agentInfo;
+    if (!info || !info.exists || knownAgents().length === 0 || !agentChanged()) {
+      setDirty(false);
+      $('btnSave').disabled = false;
+      showBanner('ok', lines.join('\n'));
+      render();
+      return;
+    }
+
+    requestJson('/api/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        instance: state.instance,
+        group: info.group,
+        app: info.app || 'agent_charge_plan',
+        data: { batch_agent_names: selectedAgents() }
+      })
+    }).then(function (result) {
+      $('btnSave').disabled = false;
+      var payload = result.payload || {};
+      if (!result.ok || !payload.ok) {
+        showBanner('err', '体力计划已保存，但角色名单保存失败：' + showErrors(payload) + '\n' + lines.join('\n'));
+        setDirty(false);
+        render();
+        return;
+      }
+      if (payload.message) { lines.push(payload.message); }
+      if (payload.warnings && payload.warnings.length > 0) {
+        lines.push('提示：' + payload.warnings.join('；'));
+      }
+      state.agentLoadedNames = selectedAgents().slice();
+      setDirty(false);
+      showBanner('ok', lines.join('\n'));
       render();
     });
   }
@@ -563,6 +768,10 @@
       if (plan.run_times) { line += '（已跑 ' + plan.run_times + '）'; }
       lines.push(line);
     });
+    var agents = selectedAgents();
+    if (agents.length > 0) {
+      lines.push('要养的角色（' + agents.length + '）：' + agents.join('、'));
+    }
     return lines.join('\n');
   }
 
@@ -601,6 +810,21 @@
       render();
     });
     $('btnSave').addEventListener('click', save);
+    $('btnAgentAll').addEventListener('click', function () {
+      knownAgents().forEach(function (name) { state.checkedAgents.add(name); });
+      setDirty(true);
+      renderAgents();
+    });
+    $('btnAgentNone').addEventListener('click', function () {
+      state.checkedAgents.clear();
+      setDirty(true);
+      renderAgents();
+    });
+    $('btnAgentKeep').addEventListener('click', function () {
+      state.agentFilter = !state.agentFilter;
+      $('btnAgentKeep').textContent = state.agentFilter ? '显示全部角色' : '只保留已勾选';
+      renderAgents();
+    });
     $('btnCopy').addEventListener('click', function () {
       copyText(summaryText()).then(function () {
         showBanner('ok', '已把配置摘要复制到剪贴板：\n' + summaryText());

@@ -58,10 +58,31 @@ UTF-8 中文会让它把命令行拆坏（实测会把 `python server.py` 拆成
   - 副本名下拉只在该「副本类型」真的有可选副本时出现（实战模拟室就是这样）；
   - 卡片数量下拉只在「实战模拟室」出现；
 - 顶部「全局选项」里可以改 `restore_charge`（恢复电量）；
-- 底部：新增一条计划、保存、**复制配置摘要**（把当前计划压成几行纯文本贴给别人看）；
+- 「要养的角色」区块：把 `agent_charge_plan.yml` 里 `known_agent_list`（游戏里扫出来的角色名）列成复选框，
+  勾选结果写回同一个文件的 `batch_agent_names`；配「全选 / 清空 / 只保留已勾选」三个按钮；
+  名单为空时给明确提示，让用户先回游戏里扫描；
+- 底部：新增一条计划、保存、**复制配置摘要**（把当前计划压成几行纯文本贴给别人看，含已勾选角色）；
 - 保存成功顶部出现绿条，形如
   `已写入 config/01/one_dragon/charge_plan.yml（备份 .backup/charge_plan.20261120_221500.yml）`；
 - 保存失败顶部出现红条，写明**第几条计划的哪个字段**错，并把那张卡片标红。
+
+## 扫描 → 勾选 → 批量生成
+
+游戏只能设一个特训目标，所以「批量配计划」分三段，浏览器只负责中间那段：
+
+1. **扫描**（在游戏里，不在本页）：一条龙里跑一次插件应用，打开「只扫描代理人名单」（`scan_only`），
+   它会读游戏里「特训目标」弹窗的代理人网格，把名字按顺序写进
+   `config/<实例>/one_dragon/agent_charge_plan.yml` 的 `known_agent_list`。
+   Web 页**不扫描** —— 浏览器碰不到游戏画面。
+2. **勾选**（在本页）：「要养的角色」区块会列出 `known_agent_list` 里的每个角色，
+   勾选结果存在页面状态里，点底部「保存到配置文件」时写进同一份 YAML 的 `batch_agent_names`。
+   - 「全选」= 全勾上；「清空」= 全部取消；
+   - 「只保留已勾选」= 列表只显示已勾选的角色（按钮变成「显示全部角色」可恢复），方便核对最终名单；
+   - 名单为空 / 文件不存在时，页面上直接提示「角色列表还是空的 —— 先在游戏里跑一次「扫描代理人列表」，再回来勾选」。
+3. **批量生成**（在游戏里）：插件按 `batch_agent_names` 逐个把特训目标切过去、读养成缺口、生成体力计划。
+
+保存分两次写：先写 `charge_plan.yml`（体力计划），再写 `agent_charge_plan.yml`（角色名单）。
+只有角色名单真的变了才会写第二份，两份各自有 `.backup/` 备份；`agent_charge_plan.yml` 不存在时跳过角色那一步。
 
 ## 接口
 
@@ -87,9 +108,25 @@ UTF-8 中文会让它把命令行拆坏（实测会把 `python server.py` 拆成
     "mission_map": { "实战模拟室": { "基础材料": [{ "label": "代理人经验", "value": "调查专项" }] } },
     "card_num_list": [{ "label": "默认数量", "value": "默认数量" }, { "label": "5张卡片", "value": "5" }],
     "restore_charge_list": [{ "label": "不使用", "value": "不使用" }]
+  },
+  "agent_charge_plan": {
+    "app": "agent_charge_plan",
+    "instances": {
+      "01": {
+        "group": "one_dragon",
+        "exists": true,
+        "rel_path": "config/01/one_dragon/agent_charge_plan.yml",
+        "known_agent_list": ["安比", "妮可", "比利"],
+        "batch_agent_names": ["安比", "比利"]
+      }
+    }
   }
 }
 ```
+
+`agent_charge_plan.instances[实例号]` 是「要养的角色」区块的数据源：
+`known_agent_list` 来自游戏里的扫描，`batch_agent_names` 是本页写回的勾选结果；
+`exists=false` 表示这个实例还没有 `agent_charge_plan.yml`（页面上会提示先扫描）。
 
 注意 `label` 和 `value` 不总一样：分类「恶名狩猎」的显示名是「恶名狩猎 深度追猎」，但存进 YAML 的是 `恶名狩猎`；
 卡片数量「5张卡片」存的是 `'5'`。前端存的是 `value`。
@@ -116,6 +153,16 @@ UTF-8 中文会让它把命令行拆坏（实测会把 `python server.py` 拆成
 ```json
 { "instance": "01", "group": "one_dragon", "app": "charge_plan", "data": { "plan_list": [ ... ] } }
 ```
+
+同一个接口也写角色名单（换 `app`，这是另一份文件）：
+
+```json
+{ "instance": "01", "group": "one_dragon", "app": "agent_charge_plan",
+  "data": { "batch_agent_names": ["安比", "比利"] } }
+```
+
+`batch_agent_names` 会去空白、去重、保留顺序；不是数组 / 含非字符串 / 含空名字都会 400，
+名字不在当前 `known_agent_list` 里只在 `warnings` 里提示（不拒绝 —— 名单可能是旧扫描的）。
 
 写回规则：
 
@@ -173,7 +220,10 @@ Invoke-RestMethod http://127.0.0.1:23099/api/config -Method Post -ContentType 'a
 ## 已知限制
 
 - **只监听 `127.0.0.1`，没有登录鉴权、没有多用户** —— 设计上就是本机单人用；
-- 只编辑 `plan_list` 与 `restore_charge`；`history_list`、`tabular` 等其他键只原样带过，不在页面上展示或编辑；
+- 只编辑 `plan_list` 与 `restore_charge`（`charge_plan.yml`），以及 `batch_agent_names`（`agent_charge_plan.yml`）；
+  `history_list`、`tabular`、`known_agent_list` 等其他键只原样带过，不在页面上编辑；
+- **角色名单只能勾选，不能在本页新增/删除角色** —— `known_agent_list` 由游戏里的扫描写入，页面只读它；
+  想让名单变，就回游戏里再扫一次；
 - 校验对「历史残留 `mission_name`」放行：老数据里 `mission_name` 常留着默认值 `调查专项`，而 `区域巡防` / `专业挑战室` / `恶名狩猎` 这些分类本身没有可选副本。
   `validate_item` 会把这种值判为非法，所以本服务在「该分类确实没有可选副本、其余字段都合法」时**保留原值并返回 `warnings`**，否则一条无损写回都做不到；
 - 改完文件后，**正在运行**的一条龙不会自动重读，需要重启对应应用（或用 GUI 里的刷新）；
@@ -190,5 +240,7 @@ Invoke-RestMethod http://127.0.0.1:23099/api/config -Method Post -ContentType 'a
 | 控制台报「找不到仓库根目录」 | 用 `--root` 指定含 `config/` 与 `src/zzz_od/` 的目录 |
 | 页面下拉全是「（无可选项）」 | `assets/game_data/compendium_data.yml` 缺失或格式变了，看控制台里的 `[警告] 预加载体力计划数据失败` |
 | 保存报「配置文件不存在」 | `config/<实例>/<组>/<app>.yml` 没建过，先在 GUI 里创建一次该应用配置 |
+| 「要养的角色」显示「角色列表还是空的」 | 还没在游戏里扫描过：跑一次 `scan_only`（只扫描代理人名单）把 `known_agent_list` 刷出来，然后刷新本页 |
+| 勾选后保存，角色名单没变 | 只有「勾选结果和文件里的 `batch_agent_names` 不同」才会写第二份文件；另外确认 `agent_charge_plan.yml` 存在（页面第一行会显示它的路径） |
 | 想把改动退回去 | 用 `.backup/<app>.<时间戳>.yml` 覆盖回正式文件即可 |
 | 双击 bat 闪一下就没了 / 进了 python REPL | bat 里混进了中文，cmd 用 OEM 代码页解析会拆坏命令行；保持这个 bat 纯 ASCII |

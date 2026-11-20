@@ -59,6 +59,12 @@ DEFAULT_PORT: int = 23099
 MAX_PORT_TRIES: int = 30
 #: POST 请求体上限（8 MiB），防止误传超大内容把内存吃满
 MAX_BODY_BYTES: int = 8 * 1024 * 1024
+#: 插件自己的配置文件（扫描结果 known_agent_list / 勾选结果 batch_agent_names 在这里）
+AGENT_APP_ID: str = 'agent_charge_plan'
+#: 一条龙默认组名
+ONE_DRAGON_GROUP: str = 'one_dragon'
+#: agent_charge_plan.yml 里「要养的角色」那个键
+AGENT_NAMES_FIELD: str = 'batch_agent_names'
 
 _INSTANCE_RE = re.compile(r'^\d{1,3}$')
 _APP_RE = re.compile(r'^[A-Za-z0-9_-]+$')
@@ -67,7 +73,7 @@ _GROUP_RE = re.compile(r'^[^\\/:*?"<>|\x00-\x1f]+$')
 
 
 class ConfigValidationError(Exception):
-    """配置校验不通过：``errors`` 里逐条说明是第几条计划的哪个字段有问题。"""
+    """配置校验不通过：``errors`` 里逐条说明是第几条计划（或第几个角色）的哪个字段有问题。"""
 
     def __init__(self, errors: list[dict[str, Any]]) -> None:
         self.errors: list[dict[str, Any]] = errors
@@ -76,7 +82,13 @@ class ConfigValidationError(Exception):
             first = errors[0]
             message = str(first.get('message', ''))
             index = first.get('index')
-            summary = f'第 {int(index) + 1} 条计划：{message}' if index is not None else message
+            if first.get('field') == AGENT_NAMES_FIELD:
+                place = f'角色名单第 {int(index) + 1} 个' if index is not None else '角色名单'
+                summary = f'{place}：{message}'
+            elif index is not None:
+                summary = f'第 {int(index) + 1} 条计划：{message}'
+            else:
+                summary = message
             if len(errors) > 1:
                 summary += f'（共 {len(errors)} 处问题）'
         super().__init__(summary)
@@ -214,7 +226,61 @@ class ChargePlanStore:
                 'app': default_app,
             },
             'charge_plan': self.charge_plan_options(),
+            'agent_charge_plan': self.agent_meta(instances, groups),
         }
+
+    def agent_meta(self, instances: list[str], groups: dict[str, list[str]]) -> dict[str, Any]:
+        """`agent_charge_plan.yml` 里的角色名单（扫描结果 + 已勾选），按实例分开返回。
+
+        角色名单是插件在游戏里扫出来的，本页只负责展示和写回 `batch_agent_names`。
+        """
+        per_instance: dict[str, dict[str, Any]] = {}
+        for instance in instances:
+            group, path = self.find_app_path(instance, AGENT_APP_ID, groups.get(instance, []))
+            if path is None:
+                per_instance[instance] = {
+                    'group': group,
+                    'exists': False,
+                    'rel_path': f'config/{instance}/{group}/{AGENT_APP_ID}.yml',
+                    'known_agent_list': [],
+                    'batch_agent_names': [],
+                }
+                continue
+            known: list[str] = []
+            batch: list[str] = []
+            error = ''
+            try:
+                data = self.load_yaml(path)
+                known = self.clean_agent_names(data.get('known_agent_list'))
+                batch = self.clean_agent_names(data.get('batch_agent_names'))
+            except (OSError, ValueError, yaml.YAMLError) as exc:
+                error = f'读取 {self.relative_path(path)} 失败: {exc}'
+            entry: dict[str, Any] = {
+                'group': group,
+                'exists': True,
+                'rel_path': self.relative_path(path),
+                'known_agent_list': known,
+                'batch_agent_names': batch,
+            }
+            if error:
+                entry['error'] = error
+            per_instance[instance] = entry
+
+        return {'app': AGENT_APP_ID, 'instances': per_instance}
+
+    def find_app_path(
+        self, instance: str, app: str, group_names: list[str]
+    ) -> tuple[str, Path | None]:
+        """在某个实例下找 `app.yml`，优先 `one_dragon` 组，找不到则给出兜底组名。"""
+        ordered = ([ONE_DRAGON_GROUP] if ONE_DRAGON_GROUP in group_names else []) + [
+            name for name in group_names if name != ONE_DRAGON_GROUP
+        ]
+        for group in ordered:
+            candidate = self.config_dir / instance / group / f'{app}.yml'
+            if candidate.is_file():
+                return group, candidate
+        fallback = ordered[0] if ordered else ONE_DRAGON_GROUP
+        return fallback, None
 
     def charge_plan_options(self) -> dict[str, Any]:
         """体力计划的可选值：分类 / 副本类型 / 副本名 / 卡片数量 / 恢复电量。"""
@@ -324,8 +390,17 @@ class ChargePlanStore:
             plan_list, plan_warnings = self.validate_plan_list(data['plan_list'])
             merged['plan_list'] = plan_list
             warnings.extend(plan_warnings)
+        if 'batch_agent_names' in data:
+            batch_names = self.validate_agent_names(data['batch_agent_names'])
+            known_agent_list = self.clean_agent_names(current.get('known_agent_list'))
+            unknown = [name for name in batch_names if known_agent_list and name not in known_agent_list]
+            if unknown:
+                warnings.append(
+                    f'这些角色不在当前 known_agent_list 里，仍按勾选结果写入：{"、".join(unknown)}'
+                )
+            merged['batch_agent_names'] = batch_names
         for key, value in data.items():
-            if key == 'plan_list':
+            if key in ('plan_list', 'batch_agent_names'):
                 continue
             merged[key] = value
 
@@ -333,7 +408,7 @@ class ChargePlanStore:
         backup_path = self.write_backup(path, app)
         self.atomic_write(path, dump_text)
 
-        return {
+        result: dict[str, Any] = {
             'instance': instance,
             'group': group,
             'app': app,
@@ -348,6 +423,66 @@ class ChargePlanStore:
                 f'（备份 {BACKUP_DIR_NAME}/{backup_path.name}）'
             ),
         }
+        if 'batch_agent_names' in merged:
+            result['batch_agent_names'] = merged['batch_agent_names']
+        return result
+
+    # ── 角色名单（agent_charge_plan.yml）──────────────────────────────────
+    @staticmethod
+    def clean_agent_names(raw: Any) -> list[str]:
+        """把 YAML 里读到的名字列表洗成干净的字符串列表（去空、去重、保留顺序）。"""
+        if not isinstance(raw, list):
+            return []
+        names: list[str] = []
+        for item in raw:
+            if not isinstance(item, str):
+                continue
+            name = item.strip()
+            if name and name not in names:
+                names.append(name)
+        return names
+
+    def validate_agent_names(self, raw: Any) -> list[str]:
+        """校验 ``batch_agent_names``；不合规直接抛 ConfigValidationError。"""
+        if not isinstance(raw, list):
+            raise ConfigValidationError(
+                [
+                    {
+                        'index': None,
+                        'field': 'batch_agent_names',
+                        'message': 'batch_agent_names 必须是数组（角色名列表）',
+                    }
+                ]
+            )
+
+        names: list[str] = []
+        errors: list[dict[str, Any]] = []
+        for index, item in enumerate(raw):
+            if not isinstance(item, str):
+                errors.append(
+                    {
+                        'index': index,
+                        'field': AGENT_NAMES_FIELD,
+                        'message': f'角色名必须是字符串，实际是 {item!r}',
+                    }
+                )
+                continue
+            name = item.strip()
+            if not name:
+                errors.append(
+                    {
+                        'index': index,
+                        'field': AGENT_NAMES_FIELD,
+                        'message': '角色名不能是空的',
+                    }
+                )
+                continue
+            if name not in names:
+                names.append(name)
+
+        if errors:
+            raise ConfigValidationError(errors)
+        return names
 
     # ── 校验 ────────────────────────────────────────────────────────────
     def validate_plan_list(self, raw: Any) -> tuple[list[dict[str, Any]], list[str]]:
