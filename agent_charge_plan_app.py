@@ -4,6 +4,12 @@
 翻译成内置体力计划的计划项写进去。执行仍然交给内置「体力计划」应用。
 
 不改主仓任何代码：写配置走 `run_context.get_config('charge_plan', ...)` 拿同一个实例。
+
+三种目标模式（配置 `goal_mode`）：
+
+- `agent_stage`：按角色养成缺口排计划（完整可用）
+- `material_floor`：按材料库存下限排计划（**目前只读不排**，原因见 `read_material_gap`）
+- `both`：两者都做
 """
 
 from __future__ import annotations
@@ -21,6 +27,7 @@ from zzz_od.operation.back_to_normal_world import BackToNormalWorld
 from . import agent_charge_plan_const
 from .agent_charge_plan_config import (
     GOAL_MODE_AGENT_STAGE,
+    GOAL_MODE_BOTH,
     GOAL_MODE_MATERIAL_FLOOR,
     AgentChargePlanConfig,
 )
@@ -28,6 +35,7 @@ from .operation.agent_plan_page import AgentPlanSnapshot, read_agent_name
 from .operation.change_agent_plan_target import ChangeAgentPlanTarget
 from .operation.goto_agent_plan import GotoAgentPlan
 from .operation.read_agent_plan_list import ReadAgentPlanList
+from .operation.read_material_calc import MaterialGapSnapshot, ReadMaterialCalc
 from .planner.charge_budget import ChargeAvailability
 from .planner.plan_mapper import PlanMapper
 from .planner.plan_models import PlanSnapshot
@@ -59,6 +67,8 @@ class AgentChargePlanApp(ZApplication):
         )
         #: 读到的特训目标清单
         self.snapshot: AgentPlanSnapshot | None = None
+        #: 读到的材料缺口
+        self.material_gap: MaterialGapSnapshot | None = None
         #: 当前剩余电量
         self.charge_power: int = 0
         #: 储蓄电量
@@ -68,10 +78,12 @@ class AgentChargePlanApp(ZApplication):
 
     @operation_node(name='开始', is_start_node=True)
     def start(self) -> OperationRoundResult:
-        """先看配置：只做材料库存这一档时，不需要读特训目标清单。"""
+        """先看配置，决定后面走哪条路。"""
         log.info(
             '特训目标体力计划开始：目标模式 %s，预览模式 %s，指定代理人「%s」',
-            self.config.goal_mode, self.config.dry_run, self.config.target_agent_name or '按游戏当前设置',
+            self.config.goal_mode,
+            self.config.dry_run,
+            self.config.target_agent_name or '按游戏当前设置',
         )
         if self.config.goal_mode == GOAL_MODE_MATERIAL_FLOOR:
             return self.round_success('只处理材料库存')
@@ -118,7 +130,10 @@ class AgentChargePlanApp(ZApplication):
         self.snapshot = snapshot
         log.info('特训目标：%s，条目 %s 个', snapshot.agent_name, len(snapshot.item_list))
         for item in snapshot.item_list:
-            log.info('  %s / %s / 电量 %s / 进度 %s', item.group_name, item.name, item.charge_text, item.progress_text)
+            log.info(
+                '  %s / %s / 电量 %s / 进度 %s',
+                item.group_name, item.name, item.charge_text, item.progress_text,
+            )
         return self.round_success()
 
     @node_from(from_name='读取清单')
@@ -127,7 +142,7 @@ class AgentChargePlanApp(ZApplication):
     def read_charge(self) -> OperationRoundResult:
         """读快捷手册资源栏的电量、储蓄电量、以太电池。
 
-        特训目标页和材料页都在快捷手册里，资源栏位置一样，所以复用内置的「电量检测」流水线。
+        特训目标页也在快捷手册里，资源栏位置一样，所以复用内置的「电量检测」流水线。
         """
         try:
             pipeline_ctx = self.ctx.cv_service.run_pipeline('电量检测', self.last_screenshot)
@@ -146,11 +161,39 @@ class AgentChargePlanApp(ZApplication):
         return self.round_success()
 
     @node_from(from_name='读取电量')
+    @operation_node(name='读取材料缺口', node_max_retry_times=1)
+    def read_material_gap(self) -> OperationRoundResult:
+        """读养成方案详情页右侧的材料预览栏。
+
+        **目前只读不排计划**：这一栏只有图标和「已有/所需」数字，没有材料名字，
+        对不到材料表就换不算出次数。要真正按材料排计划，得先补其中一样：
+        材料图标模板，或者「养成指南 → 养成材料计算」那页的建档（明细表有名字）。
+        """
+        op = ReadMaterialCalc(self.ctx, goto_first=False, allow_dialog_fallback=False)
+        result = op.execute()
+        if not result.is_success:
+            # 读不到不算致命，照常往下走，只是少了材料这一档
+            log.warning('材料缺口没读出来：%s', result.status)
+            return self.round_success('材料缺口没读到')
+
+        gap = op.data
+        if not isinstance(gap, MaterialGapSnapshot):
+            return self.round_success('材料缺口没读到')
+        self.material_gap = gap
+        for line in gap.summary_lines():
+            log.info(line)
+        return self.round_success()
+
+    @node_from(from_name='读取材料缺口')
+    @node_from(from_name='读取电量')
     @operation_node(name='生成并写入计划')
     def build_and_write(self) -> OperationRoundResult:
         """清单 → 计划项 → 写进内置体力计划配置。"""
-        if self.snapshot is None and self.config.goal_mode != GOAL_MODE_MATERIAL_FLOOR:
+        is_agent_stage = self.config.goal_mode in (GOAL_MODE_AGENT_STAGE, GOAL_MODE_BOTH)
+        if is_agent_stage and self.snapshot is None:
             return self.round_fail('还没读到特训目标清单')
+        if not is_agent_stage and self.material_gap is None:
+            return self.round_fail('材料缺口也没读到，没有可排的东西')
 
         available = ChargeAvailability(
             natural=self.charge_power,
@@ -165,6 +208,14 @@ class AgentChargePlanApp(ZApplication):
         )
         snapshot = PlanSnapshot.from_reader_snapshot(self.snapshot) if self.snapshot is not None else PlanSnapshot()
         build_result = mapper.build(snapshot, available)
+
+        if self.material_gap is not None:
+            rows = self.material_gap.plan_row_list()
+            if not rows:
+                build_result.warnings.append(
+                    f'材料预览栏只有图标没有材料名（{self.material_gap.unnamed_count} 条），'
+                    '排不了材料计划。要按材料排，先补材料图标模板，或给「养成指南 → 养成材料计算」页建档'
+                )
 
         writer = PlanWriter(self.ctx)
         write_result = writer.write(
@@ -185,7 +236,10 @@ class AgentChargePlanApp(ZApplication):
         keep_count = sum(1 for change in write_result.changes if change.kind == 'keep')
         for change in write_result.changes:
             if change.kind != 'keep':
-                log.info('[%s] %s 次数 %s 卡数 %s %s', change.kind, change.key, change.plan_times, change.card_num, change.detail)
+                log.info(
+                    '[%s] %s 次数 %s 卡数 %s %s',
+                    change.kind, change.key, change.plan_times, change.card_num, change.detail,
+                )
         for warning in write_result.warnings:
             log.warning(warning)
         log.info(
@@ -201,22 +255,9 @@ class AgentChargePlanApp(ZApplication):
 
     @node_from(from_name='生成并写入计划')
     @node_from(from_name='生成并写入计划', success=False)
-    @node_from(from_name='读取电量')
     @node_notify(when=NotifyTiming.CURRENT_DONE, detail=True)
     @operation_node(name='返回大世界')
     def back_to_world(self) -> OperationRoundResult:
         """回大世界，结束。"""
         op = BackToNormalWorld(self.ctx)
         return self.round_by_op_result(op.execute())
-
-
-def _goal_mode_is_agent_stage(config: AgentChargePlanConfig) -> bool:
-    """目标模式里包不包含「按角色养成」这一档。
-
-    Args:
-        config: 插件配置
-
-    Returns:
-        需要读特训目标清单时为 True
-    """
-    return config.goal_mode in (GOAL_MODE_AGENT_STAGE, 'both')
