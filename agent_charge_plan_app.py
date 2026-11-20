@@ -423,6 +423,9 @@ class AgentChargePlanApp(ZApplication):
         if not goto_result.success:
             return self.round_by_op_result(goto_result)
 
+        # 节点开始前那张截图是导航之前的画面（可能还停在大世界），资源栏不一定在，
+        # 所以走完导航必须重新截一张再去读电量。
+        self.screenshot()
         self.execute_availability = self._read_charge_availability()
         log.info(
             '边刷边算开始：可用电量 %s（自然 %s + 储蓄 %s + 以太电池 %s 颗）',
