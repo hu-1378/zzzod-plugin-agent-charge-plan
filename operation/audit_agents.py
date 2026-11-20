@@ -24,13 +24,13 @@ import numpy as np
 import yaml
 from PIL import Image, ImageDraw
 
+from agent_charge_plan import agent_charge_plan_const
 from agent_charge_plan.planner.charge_budget import ChargeAvailability
 from agent_charge_plan.planner.plan_mapper import PlanMapper
 from agent_charge_plan.planner.plan_models import PlanBuildResult, PlanSnapshot
 from one_dragon.base.operation.operation_edge import node_from
 from one_dragon.base.operation.operation_node import operation_node
 from one_dragon.base.operation.operation_round_result import OperationRoundResult
-from one_dragon.utils import os_utils
 from one_dragon.utils.log_utils import log
 from zzz_od.operation.zzz_operation import ZOperation
 
@@ -39,6 +39,7 @@ from .agent_plan_page import AgentPlanItem, AgentPlanSnapshot
 from .change_agent_plan_target import ChangeAgentPlanTarget
 from .goto_agent_plan import GotoAgentPlan
 from .read_agent_plan_list import ReadAgentPlanList
+from .restore_agent_target import restore_agent_target
 
 if TYPE_CHECKING:
     from cv2.typing import MatLike
@@ -57,6 +58,20 @@ PLAN_FILE_NAME: str = '计划.yml'
 SCREEN_FILE_NAME: str = '特训目标页.png'
 #: 输出根目录里的汇总
 SUMMARY_FILE_NAME: str = '汇总.md'
+#: 默认输出根目录旁的说明文件（写一次，免得用户以为这是要备份的配置）
+ROOT_README_FILE_NAME: str = 'README.txt'
+#: 说明文件的内容
+ROOT_README_TEXT: str = (
+    '这个目录是「特训目标体力计划」插件的全角色核对产物。\n'
+    '\n'
+    '每次核对会按时间戳建一个子目录，里面是每个角色一份：\n'
+    '  清单.txt        该角色特训目标页读到的全部条目\n'
+    '  计划.yml        按这些条目算出来的体力计划（只算不写，不会进内置体力计划）\n'
+    '  特训目标页.png   读完清单时的整屏截图（右下角 UID 已涂黑）\n'
+    '  汇总.md（在时间戳目录里）一个表看完所有角色\n'
+    '\n'
+    '这个目录可以随时整个删掉，插件的配置不在这里（配置是同级的 agent_charge_plan.yml）。\n'
+)
 
 #: 默认输出根目录名（放在 config/<实例>/<组>/ 下面，方便用户找）
 AUDIT_DIR_NAME: str = 'agent_audit'
@@ -218,21 +233,17 @@ def unique_dir_name(agent_name: str, used_name_set: set[str]) -> str:
 
 
 def resolve_output_root(
-    work_dir: Path,
-    instance_idx: int,
-    group_id: str,
+    data_dir: Path,
     custom_dir: str,
     now: datetime,
 ) -> Path:
     """算出这次核对的输出根目录。
 
-    默认放在 `config/<实例>/<组>/agent_audit/<时间戳>/`，和配置放在一起方便用户找；
+    默认放在插件数据目录下 `agent_audit/<时间戳>/`（guide 要求插件数据不写进 config/）；
     配了 `audit_output_dir` 就用那个目录，但仍然按时间戳再分一层，免得这次把上次的结果盖掉。
 
     Args:
-        work_dir: 一条龙工作目录（仓库根）
-        instance_idx: 账号下标
-        group_id: 应用组
+        data_dir: 插件的持久化数据目录（`ctx.get_plugin_data_dir(app_id)`）
         custom_dir: 配置里的输出目录，空字符串表示用默认位置
         now: 这次核对的时间
 
@@ -243,7 +254,7 @@ def resolve_output_root(
     custom = (custom_dir or '').strip()
     if custom:
         return Path(custom) / stamp
-    return Path(work_dir) / 'config' / f'{instance_idx:02d}' / group_id / AUDIT_DIR_NAME / stamp
+    return Path(data_dir) / AUDIT_DIR_NAME / stamp
 
 
 def build_item_text(agent_name: str, item_list: list[AgentPlanItem]) -> str:
@@ -269,28 +280,46 @@ def build_item_text(agent_name: str, item_list: list[AgentPlanItem]) -> str:
 def build_plan_yaml(
     agent_name: str,
     plan_result: PlanBuildResult,
-    generated_at: datetime,
 ) -> str:
     """把算出来的计划写成 YAML。
 
     结构和内置 `charge_plan.yml` 的 `plan_list` 一致，另加 `warnings` 段说明哪些条目被跳过、为什么。
 
+    故意**不写** `plan_id` 和生成时间：这两样每次都不一样，会把 `diff` 弄得到处是噪声，
+    而这个文件就是拿来两次核对相互比对的。时间看目录名和 `汇总.md` 就够了。
+
     Args:
         agent_name: 角色名
         plan_result: `PlanMapper` 的产出
-        generated_at: 生成时间
 
     Returns:
         YAML 文本
     """
+    plan_list: list[dict[str, Any]] = []
+    for item in plan_result.plan_list:
+        row = item.to_dict()
+        row.pop('plan_id', None)
+        plan_list.append(row)
+
     data: dict[str, Any] = {
         'agent_name': agent_name,
-        'generated_at': generated_at.strftime('%Y-%m-%d %H:%M:%S'),
         'estimated_total_charge': plan_result.estimated_total_charge,
-        'plan_list': [item.to_dict() for item in plan_result.plan_list],
-        'warnings': list(plan_result.warnings),
+        'plan_list': plan_list,
+        'warnings': combined_warnings(plan_result),
     }
     return yaml.safe_dump(data, allow_unicode=True, sort_keys=False)
+
+
+def combined_warnings(plan_result: PlanBuildResult) -> list[str]:
+    """这个角色要写进文件的全部提示：mapper 自己的 + 被跳过条目的原因。
+
+    Args:
+        plan_result: `PlanMapper` 的产出
+
+    Returns:
+        提示列表，直接写进 `计划.yml` 的 `warnings` 段
+    """
+    return list(plan_result.warnings) + collect_skip_warnings(plan_result)
 
 
 def build_summary_markdown(
@@ -335,6 +364,47 @@ def build_summary_markdown(
     return '\n'.join(lines) + '\n'
 
 
+def collect_skip_warnings(plan_result: PlanBuildResult) -> list[str]:
+    """把 `PlanMapper` 里「被跳过的条目」补成 warnings。
+
+    `PlanMapper` 只把跳过记在 `changes` 里（比如驱动盘分组按配置不排），warnings 里没有，
+    于是「条目 4 条、可刷 3 条」会让人以为漏了一条。核对是把结果给人看的，差的那条必须说清楚原因。
+
+    已经出现在 `plan_result.warnings` 里的不再重复加。
+
+    Args:
+        plan_result: `PlanMapper` 的产出
+
+    Returns:
+        多出来的说明，一行一条
+    """
+    extra: list[str] = []
+    for change in plan_result.changes:
+        if change.kind != 'skip':
+            continue
+        line = f'{change.label}：{change.detail}' if change.detail else change.label
+        if line in plan_result.warnings or line in extra:
+            continue
+        extra.append(line)
+    return extra
+
+
+def write_root_readme(parent_dir: Path) -> Path:
+    """在默认输出根目录旁边写一份说明（只写一次，不覆盖用户改过的）。
+
+    Args:
+        parent_dir: 放时间戳子目录的那个 `agent_audit` 目录
+
+    Returns:
+        说明文件的路径
+    """
+    parent_dir.mkdir(parents=True, exist_ok=True)
+    readme_path = parent_dir / ROOT_README_FILE_NAME
+    if not readme_path.exists():
+        readme_path.write_text(ROOT_README_TEXT, encoding='utf-8')
+    return readme_path
+
+
 def mask_uid(screen: MatLike) -> Image.Image:
     """把截图右下角的 UID 涂黑，返回可以直接存的 PIL 图片。
 
@@ -358,7 +428,6 @@ def write_agent_files(
     snapshot: AgentPlanSnapshot,
     plan_result: PlanBuildResult,
     screen: MatLike,
-    generated_at: datetime,
 ) -> list[str]:
     """把一个角色的清单、计划、截图写进它的目录。
 
@@ -368,7 +437,6 @@ def write_agent_files(
         snapshot: 读到的清单
         plan_result: 算出来的计划
         screen: 读完清单时的整屏截图（BGR）
-        generated_at: 生成时间
 
     Returns:
         写出来的文件路径（字符串）
@@ -379,7 +447,7 @@ def write_agent_files(
     item_path.write_text(build_item_text(agent_name, snapshot.item_list), encoding='utf-8')
 
     plan_path = target_dir / PLAN_FILE_NAME
-    plan_path.write_text(build_plan_yaml(agent_name, plan_result, generated_at), encoding='utf-8')
+    plan_path.write_text(build_plan_yaml(agent_name, plan_result), encoding='utf-8')
 
     screen_path = target_dir / SCREEN_FILE_NAME
     mask_uid(screen).save(screen_path, format='PNG')
@@ -473,6 +541,12 @@ class AuditAgents(ZOperation):
         self.output_root: Path | None = None
         """输出根目录"""
 
+        self.original_agent_name: str = ''
+        """进来时的特训目标。跑完要恢复成它，读不到就跳过恢复"""
+
+        self.summary: AuditSummary | None = None
+        """写好的汇总，恢复原目标之后当作执行结果的 data 交出去"""
+
         self.used_dir_name_set: set[str] = set()
         """已经用掉的子目录名（防撞名覆盖）"""
 
@@ -488,6 +562,17 @@ class AuditAgents(ZOperation):
         return self.round_by_op_result(GotoAgentPlan(self.ctx).execute(), retry_on_fail=True)
 
     @node_from(from_name='确认特训目标页')
+    @operation_node(name='记住原目标')
+    def remember_original_target(self) -> OperationRoundResult:
+        """记下进来时的特训目标，跑完好放回去。读不到就留空，恢复那一步会跳过。"""
+        self.original_agent_name = agent_plan_page.read_agent_name(
+            self.ctx, self.last_screenshot
+        )
+        if not self.original_agent_name:
+            return self.round_success(status='进来时没有特训目标')
+        return self.round_success(status=f'原特训目标 {self.original_agent_name}')
+
+    @node_from(from_name='记住原目标')
     @operation_node(name='准备输出目录')
     def prepare_output_dir(self) -> OperationRoundResult:
         """建输出根目录，顺便确认名单不是空的。"""
@@ -496,15 +581,19 @@ class AuditAgents(ZOperation):
                 status='名单是空的：先在游戏里跑一次「扫描代理人列表」，或者去 Web 页勾选要养的角色'
             )
 
-        root = resolve_output_root(
-            Path(os_utils.get_work_dir()),
-            self.instance_idx,
-            self.group_id,
-            self.config.audit_output_dir,
-            datetime.now(),
+        # 配了自定义目录就不去问插件数据目录，免得白算一次路径
+        custom_dir = (self.config.audit_output_dir or '').strip()
+        data_dir = (
+            Path('.') if custom_dir
+            else self.ctx.get_plugin_data_dir(agent_charge_plan_const.APP_ID)
         )
+        root = resolve_output_root(data_dir, custom_dir, datetime.now())
         root.mkdir(parents=True, exist_ok=True)
         self.output_root = root
+        if not custom_dir:
+            # 默认位置旁边说一句「这是产物，能删」，免得用户以为要备份
+            readme_path = write_root_readme(root.parent)
+            log.info('核对产物目录说明：%s', readme_path)
         log.info('要核对 %s 个角色（%s），结果放 %s', len(self.agent_name_list), self.agent_source, root)
         return self.round_success(status=f'输出目录 {root}')
 
@@ -525,7 +614,7 @@ class AuditAgents(ZOperation):
         try:
             self._audit_one(name, result)
         except Exception as exc:  # noqa: BLE001 - 单个角色出岔子不能中断整轮
-            log.warning('核对「%s」时出错：%s', name, exc, exc_info=True)
+            log.error('核对「%s」时出错：%s', name, exc, exc_info=True)
             result.error = f'核对出错：{exc}'
 
         self.result_list.append(result)
@@ -557,10 +646,18 @@ class AuditAgents(ZOperation):
             summary_path=str(summary_path),
             result_list=list(self.result_list),
         )
+        self.summary = summary
         for line in summary.summary_lines():
             log.info(line)
         return self.round_success(status=f'核对 {len(self.result_list)} 个角色，汇总 {summary_path}',
                                   data=summary)
+
+    @node_from(from_name='写汇总')
+    @operation_node(name='恢复原目标')
+    def restore_target(self) -> OperationRoundResult:
+        """把特训目标放回进来时那个。核对只读，不该留下痕迹。"""
+        ok, detail = restore_agent_target(self.ctx, self.original_agent_name)
+        return self.round_success(status=detail, data=self.summary if ok else None)
 
     # ── 小工具 ──────────────────────────────────────────────────────────
     def _take_next_agent(self) -> str | None:
@@ -600,7 +697,9 @@ class AuditAgents(ZOperation):
         result.item_count = len(snapshot.item_list)
         result.planned_count = len(plan_result.plan_list)
         result.estimated_charge = plan_result.estimated_total_charge
-        result.warnings = list(plan_result.warnings)
+        # PlanMapper 把「跳过」只记在 changes 里，这里补成 warnings，
+        # 不然「条目 4 / 可刷 3」差的那条看起来像漏了
+        result.warnings = combined_warnings(plan_result)
 
         if self.output_root is None:
             result.error = '输出目录没建起来'
@@ -608,7 +707,7 @@ class AuditAgents(ZOperation):
 
         target_dir = self.output_root / (result.dir_name or sanitize_dir_name(agent_name))
         result.file_list = write_agent_files(
-            target_dir, agent_name, snapshot, plan_result, screen, datetime.now()
+            target_dir, agent_name, snapshot, plan_result, screen
         )
         log.info('「%s」的结果已写进 %s', agent_name, target_dir)
 

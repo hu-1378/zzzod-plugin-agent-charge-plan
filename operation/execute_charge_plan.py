@@ -68,6 +68,7 @@ from .change_agent_plan_target import ChangeAgentPlanTarget
 from .goto_agent_plan import GotoAgentPlan
 from .read_agent_plan_list import ReadAgentPlanList
 from .read_material_calc import MaterialGapSnapshot, ReadMaterialCalc
+from .restore_agent_target import restore_agent_target
 
 if TYPE_CHECKING:
     from agent_charge_plan.agent_charge_plan_config import AgentChargePlanConfig
@@ -91,6 +92,8 @@ STATUS_CHARGE_EMPTY: str = '电量用完，结束'
 STATUS_LIST_DONE: str = '名单跑完，结束'
 #: 已经切到下一个角色，需要重读清单
 STATUS_AGENT_SWITCHED: str = '已切换到下一个角色'
+#: 收尾：恢复原特训目标
+STATUS_RESTORED: str = '已恢复原特训目标'
 
 #: 四个副本 Operation 报「电量不足」时用的都是同一个常量，这里直接引用，别手抄字符串
 STATUS_CHARGE_NOT_ENOUGH: str = CombatSimulation.STATUS_CHARGE_NOT_ENOUGH
@@ -668,6 +671,9 @@ class ExecuteChargePlan(ZOperation):
         self.agent_name: str = ''
         """当前特训目标是谁"""
 
+        self.original_agent_name: str = ''
+        """进来时的特训目标。跑完（电量用完或名单跑完）要恢复成它，读不到就跳过恢复"""
+
         self.pending_agent_list: list[str] = _unique_names(config.batch_agent_names)
         """还没轮到的角色（批量名单去掉当前这个）"""
 
@@ -691,6 +697,17 @@ class ExecuteChargePlan(ZOperation):
         return self.round_by_op_result(op.execute(), retry_on_fail=True)
 
     @node_from(from_name='确认特训目标页')
+    @operation_node(name='记住原目标')
+    def remember_original_target(self) -> OperationRoundResult:
+        """记下进来时的特训目标，跑完（电量用完/名单跑完）要放回去。读不到就留空。"""
+        self.original_agent_name = agent_plan_page.read_agent_name(
+            self.ctx, self.last_screenshot
+        )
+        if not self.original_agent_name:
+            return self.round_success(status='进来时没有特训目标')
+        return self.round_success(status=f'原特训目标 {self.original_agent_name}')
+
+    @node_from(from_name='记住原目标')
     @node_from(from_name='换下一个角色', status=STATUS_AGENT_SWITCHED)
     @operation_node(name='读清单')
     def read_plan_list(self) -> OperationRoundResult:
@@ -861,7 +878,7 @@ class ExecuteChargePlan(ZOperation):
                 self.report.skipped_list = [
                     f'{key}：{reason}' for key, reason in self.book.skipped_keys.items()
                 ]
-                return self.round_success(status=STATUS_LIST_DONE, data=self._make_report())
+                return self.round_success(status=STATUS_LIST_DONE)
 
             if agent_plan_page.agent_name_similar(next_name, self.agent_name):
                 # 名单里就有当前这个角色，不用切，直接重读清单校准
@@ -874,6 +891,14 @@ class ExecuteChargePlan(ZOperation):
             if result.success:
                 return self.round_success(status=STATUS_AGENT_SWITCHED, data=next_name)
             log.warning('切到「%s」失败：%s，换下一个', next_name, result.status)
+
+    @node_from(from_name='挑任务', status=STATUS_CHARGE_EMPTY)
+    @node_from(from_name='换下一个角色', status=STATUS_LIST_DONE)
+    @operation_node(name='恢复原目标')
+    def restore_target(self) -> OperationRoundResult:
+        """收尾：把特训目标放回进来时那个，别把用户的游戏设置留在最后一个角色上。"""
+        restore_agent_target(self.ctx, self.original_agent_name)
+        return self.round_success(status=STATUS_RESTORED, data=self._make_report())
 
     # ── 小工具 ──────────────────────────────────────────────────────────
     def _current_item(self) -> ChargePlanItem | None:

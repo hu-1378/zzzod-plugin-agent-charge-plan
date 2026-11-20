@@ -16,12 +16,7 @@ GOAL_MODE_MATERIAL_FLOOR: str = 'material_floor'
 #: 目标模式：两者都要
 GOAL_MODE_BOTH: str = 'both'
 
-#: 运行模式：只算计划写进内置体力计划的配置
-RUN_MODE_PLAN_ONLY: str = 'plan_only'
-#: 运行模式：自己边跑边算边刷
-RUN_MODE_EXECUTE: str = 'execute'
-
-#: 运行模式：只算计划写进内置体力计划，执行交给内置应用（默认，跟以前一样）
+#: 运行模式：只算计划写进内置体力计划，执行交给内置应用（默认）
 RUN_MODE_PLAN_ONLY: str = 'plan_only'
 #: 运行模式：自己边跑边算边刷，不再需要内置体力计划
 RUN_MODE_EXECUTE: str = 'execute'
@@ -62,16 +57,6 @@ class AgentChargePlanConfig(ApplicationConfig):
     def goal_mode(self, new_value: str) -> None:
         """改目标模式。"""
         self.update('goal_mode', new_value)
-
-    @property
-    def run_mode(self) -> str:
-        """运行模式：`plan_only` 只写内置体力计划的配置；`execute` 自己边跑边刷。"""
-        return self.get('run_mode', RUN_MODE_PLAN_ONLY)
-
-    @run_mode.setter
-    def run_mode(self, new_value: str) -> None:
-        """改运行模式。"""
-        self.update('run_mode', new_value)
 
     @property
     def dry_run(self) -> bool:

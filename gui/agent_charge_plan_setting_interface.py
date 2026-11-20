@@ -41,6 +41,7 @@ class RunModeEnum(Enum):
 
     PLAN_ONLY = ConfigItem(label='只生成计划（交给内置体力计划去跑）', value='plan_only')
     EXECUTE = ConfigItem(label='自己刷（边跑边算，刷完自动切下一个角色）', value='execute')
+    AUDIT = ConfigItem(label='全角色核对（只读不刷，按角色输出清单与截图）', value='audit')
 
 
 class AgentChargePlanSettingInterface(VerticalScrollInterface, GroupIdMixin):

@@ -26,7 +26,6 @@ from one_dragon.base.operation.operation_edge import node_from
 from one_dragon.base.operation.operation_node import operation_node
 from one_dragon.base.operation.operation_notify import NotifyTiming, node_notify
 from one_dragon.utils.log_utils import log
-from zzz_od.application.charge_plan.charge_plan_app import ChargePlanApp
 from zzz_od.application.zzz_application import ZApplication
 from zzz_od.operation.back_to_normal_world import BackToNormalWorld
 
@@ -49,6 +48,7 @@ from .operation.change_agent_plan_target import ChangeAgentPlanTarget
 from .operation.execute_charge_plan import ExecuteChargePlan, ExecuteReport
 from .operation.goto_agent_plan import GotoAgentPlan
 from .operation.read_agent_plan_list import ReadAgentPlanList
+from .operation.read_charge_power import read_charge
 from .operation.read_material_calc import MaterialGapSnapshot, ReadMaterialCalc
 from .operation.scan_agent_list import AgentNameList, ScanAgentList
 from .planner.charge_budget import ChargeAvailability
@@ -282,10 +282,9 @@ class AgentChargePlanApp(ZApplication):
         特训目标页也在快捷手册里，资源栏位置一样，所以复用内置的「电量检测」流水线。
         """
         try:
-            pipeline_ctx = self.ctx.cv_service.run_pipeline('电量检测', self.last_screenshot)
-            battery, backup, ether = ChargePlanApp._parse_battery_charge_ocr(pipeline_ctx.ocr_result)
+            battery, backup, ether = read_charge(self.ctx, self.last_screenshot)
         except Exception:
-            log.warning('电量识别失败，按自然电量上限 %s 处理', self.DEFAULT_NATURAL_CHARGE, exc_info=True)
+            log.error('电量识别失败，按自然电量上限 %s 处理', self.DEFAULT_NATURAL_CHARGE, exc_info=True)
             self.charge_power = self.DEFAULT_NATURAL_CHARGE
             self.backup_charge_power = 0
             self.ether_battery = 0
@@ -503,16 +502,7 @@ class AgentChargePlanApp(ZApplication):
         Returns:
             可用电量；识别失败时按自然电量上限保守估
         """
-        try:
-            pipeline_ctx = self.ctx.cv_service.run_pipeline('电量检测', self.last_screenshot)
-            battery, backup, ether = ChargePlanApp._parse_battery_charge_ocr(
-                pipeline_ctx.ocr_result
-            )
-        except Exception:
-            log.warning(
-                '电量识别失败，按自然电量上限 %s 处理', self.DEFAULT_NATURAL_CHARGE, exc_info=True
-            )
-            return ChargeAvailability(natural=self.DEFAULT_NATURAL_CHARGE)
+        battery, backup, ether = read_charge(self.ctx, self.last_screenshot)
 
         if battery <= 0:
             log.warning(

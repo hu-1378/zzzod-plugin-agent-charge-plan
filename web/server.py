@@ -71,12 +71,15 @@ RUN_MODE_FIELD: str = 'run_mode'
 RUN_MODE_PLAN_ONLY: str = 'plan_only'
 #: 运行模式：自己边跑边算边刷
 RUN_MODE_EXECUTE: str = 'execute'
+#: 只读核对：按角色输出清单与截图，不写计划也不真刷
+RUN_MODE_AUDIT: str = 'audit'
 #: 运行模式可选值。顺序就是下拉框里的顺序
-RUN_MODE_LIST: tuple[str, ...] = (RUN_MODE_PLAN_ONLY, RUN_MODE_EXECUTE)
+RUN_MODE_LIST: tuple[str, ...] = (RUN_MODE_PLAN_ONLY, RUN_MODE_EXECUTE, RUN_MODE_AUDIT)
 #: 运行模式在页面上显示的文字
 RUN_MODE_LABEL_MAP: dict[str, str] = {
     RUN_MODE_PLAN_ONLY: '只排计划（交给内置体力计划去跑）',
     RUN_MODE_EXECUTE: '自己边刷边算（不再需要内置体力计划）',
+    RUN_MODE_AUDIT: '全角色核对（只读，按角色出清单与截图）',
 }
 
 _INSTANCE_RE = re.compile(r'^\d{1,3}$')

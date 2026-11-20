@@ -23,6 +23,7 @@ from agent_charge_plan.operation.audit_agents import (
     FALLBACK_DIR_NAME,
     ITEM_FILE_NAME,
     PLAN_FILE_NAME,
+    ROOT_README_FILE_NAME,
     SCREEN_FILE_NAME,
     STATUS_AUDIT_DONE,
     SUMMARY_FILE_NAME,
@@ -34,12 +35,15 @@ from agent_charge_plan.operation.audit_agents import (
     build_item_text,
     build_plan_yaml,
     build_summary_markdown,
+    collect_skip_warnings,
+    combined_warnings,
     mask_uid,
     resolve_output_root,
     sanitize_dir_name,
     unique_dir_name,
     unique_name_list,
     write_agent_files,
+    write_root_readme,
 )
 from agent_charge_plan.planner.charge_budget import ChargeAvailability
 from agent_charge_plan.planner.plan_mapper import PlanMapper
@@ -214,24 +218,24 @@ def test_unique_name_list_dedupes() -> None:
 
 
 def test_resolve_output_root_default() -> None:
-    """默认放在 config/<实例>/<组>/agent_audit/<时间戳>/。"""
-    root = resolve_output_root(Path('Z:/repo'), 1, 'one_dragon', '', _now())
+    """默认放在插件数据目录下 agent_audit/<时间戳>/（不写 config/）。"""
+    root = resolve_output_root(Path('Z:/data'), '', _now())
 
-    assert root == Path('Z:/repo/config/01/one_dragon/agent_audit/20261121_030405')
+    assert root == Path('Z:/data/agent_audit/20261121_030405')
 
 
 def test_resolve_output_root_custom_dir() -> None:
     """配了目录就用它，但仍然按时间戳分一层，免得盖掉上次的结果。"""
-    root = resolve_output_root(Path('Z:/repo'), 3, 'one_dragon', 'D:/核对结果', _now())
+    root = resolve_output_root(Path('Z:/data'), 'D:/核对结果', _now())
 
     assert root == Path('D:/核对结果/20261121_030405')
 
 
 def test_resolve_output_root_custom_dir_blank_means_default() -> None:
     """自定义目录只填空格也当没配。"""
-    root = resolve_output_root(Path('Z:/repo'), 2, 'g', '   ', _now())
+    root = resolve_output_root(Path('Z:/data'), '   ', _now())
 
-    assert root == Path('Z:/repo/config/02/g/agent_audit/20261121_030405')
+    assert root == Path('Z:/data/agent_audit/20261121_030405')
 
 
 # ============================= 清单文本 =============================
@@ -281,21 +285,50 @@ def test_build_plan_yaml_structure(full_ctx: StubContext) -> None:
     )
     plan_result = mapper.build(snapshot, ChargeAvailability(natural=240))
 
-    text = build_plan_yaml('安东·伊万诺夫', plan_result, _now())
+    text = build_plan_yaml('安东·伊万诺夫', plan_result)
     data = yaml.safe_load(text)
 
     assert data['agent_name'] == '安东·伊万诺夫'
-    assert data['generated_at'] == '2026-11-21 03:04:05'
     assert len(data['plan_list']) == len(plan_result.plan_list) == 1
     item = data['plan_list'][0]
     assert item['category_name'] == '实战模拟室'
     assert item['mission_type_name'] == '基础材料'
     assert item['mission_name'] == '调查专项'
     assert item['plan_times'] >= 1
-    # 和内置配置同样的字段集合（plan_id 也在，方便以后直接拷进 charge_plan.yml）
-    assert 'plan_id' in item
-    assert 'skipped' not in item  # 只跑一次的临时标记不落盘
+    # 内置配置里其它字段都在
+    assert item['tab_name'] == '训练'
+    assert item['card_num']
+    # 只跑一次的临时标记不落盘
+    assert 'skipped' not in item
     assert isinstance(data['warnings'], list)
+
+
+def test_build_plan_yaml_is_diffable(full_ctx: StubContext) -> None:
+    """两次核对同一个角色，`计划.yml` 必须一模一样，才能直接 diff。
+
+    所以不能写 `plan_id`（每次随机）和生成时间（每次都变）。
+    """
+    mapper = PlanMapper(full_ctx)
+    snapshot = PlanSnapshot.from_rows(
+        [
+            {
+                'group_name': '代理人',
+                'entry_name': '调查员记录',
+                'charge_text': '20-100',
+                'progress_text': '129/290',
+            }
+        ],
+        agent_name='安东',
+    )
+    first_result = mapper.build(snapshot, ChargeAvailability(natural=240))
+    second_result = mapper.build(snapshot, ChargeAvailability(natural=240))
+
+    first_text = build_plan_yaml('安东', first_result)
+    second_text = build_plan_yaml('安东', second_result)
+
+    assert first_text == second_text
+    assert 'plan_id' not in first_text
+    assert 'generated_at' not in first_text
 
 
 def test_build_plan_yaml_keeps_warnings(full_ctx: StubContext) -> None:
@@ -314,10 +347,93 @@ def test_build_plan_yaml_keeps_warnings(full_ctx: StubContext) -> None:
     )
     plan_result = mapper.build(snapshot, ChargeAvailability(natural=240))
 
-    data = yaml.safe_load(build_plan_yaml('安东', plan_result, _now()))
+    data = yaml.safe_load(build_plan_yaml('安东', plan_result))
 
     assert data['plan_list'] == []
     assert data['warnings'], '认不出的条目必须留一条 warning'
+
+
+def test_collect_skip_warnings_covers_drive_disc(full_ctx: StubContext) -> None:
+    """驱动盘条目被跳过时，warnings 里必须有原因，不能让人以为漏了一条。"""
+    mapper = PlanMapper(full_ctx)
+    snapshot = PlanSnapshot.from_rows(
+        [
+            {
+                'group_name': '代理人',
+                'entry_name': '调查员记录',
+                'charge_text': '20-100',
+                'progress_text': '129/290',
+            },
+            {
+                'group_name': '驱动盘',
+                'entry_name': '猎人与忠犬',
+                'charge_text': '60',
+                'progress_text': None,
+            },
+        ],
+        agent_name='安东',
+    )
+    plan_result = mapper.build(snapshot, ChargeAvailability(natural=240))
+
+    # mapper 自己只说排上了 1 条，不说为什么少了一条
+    assert len(plan_result.plan_list) == 1
+    extra = collect_skip_warnings(plan_result)
+
+    assert len(extra) == 1
+    assert '猎人与忠犬' in extra[0]
+    assert '驱动盘' in extra[0]
+    # 补进 warnings 之后，条目数和可刷条数差的那条能对上
+    assert len(list(plan_result.warnings) + extra) >= 1
+
+
+def test_collect_skip_warnings_no_duplicate(full_ctx: StubContext) -> None:
+    """已经在 warnings 里的说明不重复加。"""
+    mapper = PlanMapper(full_ctx)
+    snapshot = PlanSnapshot.from_rows(
+        [
+            {
+                'group_name': '代理人',
+                'entry_name': '新版本才有的条目',
+                'charge_text': '20-100',
+                'progress_text': '1/10',
+            }
+        ],
+        agent_name='安东',
+    )
+    plan_result = mapper.build(snapshot, ChargeAvailability(natural=240))
+
+    extra = collect_skip_warnings(plan_result)
+
+    assert all(line not in plan_result.warnings for line in extra)
+
+
+def test_plan_yaml_warnings_explain_reduced_count(full_ctx: StubContext) -> None:
+    """`计划.yml` 的 warnings 里必须能看出「条目 3 条、只排 2 条」差在哪。"""
+    mapper = PlanMapper(full_ctx)
+    snapshot = PlanSnapshot.from_rows(
+        [
+            {
+                'group_name': '代理人',
+                'entry_name': '调查员记录',
+                'charge_text': '20-100',
+                'progress_text': '129/290',
+            },
+            {
+                'group_name': '驱动盘',
+                'entry_name': '猎人与忠犬',
+                'charge_text': '60',
+                'progress_text': None,
+            },
+        ],
+        agent_name='安东',
+    )
+    plan_result = mapper.build(snapshot, ChargeAvailability(natural=240))
+
+    data = yaml.safe_load(build_plan_yaml('安东', plan_result))
+
+    assert len(data['plan_list']) == 1
+    assert any('驱动盘' in line and '猎人与忠犬' in line for line in data['warnings'])
+    assert combined_warnings(plan_result) == data['warnings']
 
 
 # ============================= 汇总 markdown =============================
@@ -424,7 +540,7 @@ def test_write_agent_files(tmp_path: Path, full_ctx: StubContext) -> None:
     target_dir = tmp_path / '安东·伊万诺夫'
 
     file_list = write_agent_files(
-        target_dir, '安东·伊万诺夫', snapshot, plan_result, _screen(), _now()
+        target_dir, '安东·伊万诺夫', snapshot, plan_result, _screen()
     )
 
     assert {Path(path).name for path in file_list} == {
@@ -643,9 +759,176 @@ def test_audit_summary_lists_files(tmp_path: Path, full_ctx: StubContext) -> Non
     )
     target_dir = tmp_path / 'x'
 
-    file_list = write_agent_files(
-        target_dir, 'x', snapshot, plan_result, _screen(), _now()
-    )
+    file_list = write_agent_files(target_dir, 'x', snapshot, plan_result, _screen())
 
     assert all(Path(path).parent == target_dir for path in file_list)
     assert len(file_list) == 3
+
+
+# ============================= 默认目录旁的 README =============================
+
+
+def test_write_root_readme(tmp_path: Path) -> None:
+    """默认输出目录旁边写一份说明，告诉用户这是产物、可以删。"""
+    readme_path = write_root_readme(tmp_path / 'agent_audit')
+
+    assert readme_path.name == ROOT_README_FILE_NAME
+    assert readme_path.exists()
+    text = readme_path.read_text(encoding='utf-8')
+    assert '核对产物' in text
+    assert '随时整个删掉' in text
+    assert 'agent_charge_plan.yml' in text
+
+
+def test_write_root_readme_keeps_user_edits(tmp_path: Path) -> None:
+    """用户改过说明文件就别覆盖。"""
+    parent = tmp_path / 'agent_audit'
+    parent.mkdir()
+    readme_path = parent / ROOT_README_FILE_NAME
+    readme_path.write_text('我自己写的', encoding='utf-8')
+
+    write_root_readme(parent)
+
+    assert readme_path.read_text(encoding='utf-8') == '我自己写的'
+
+
+def test_prepare_output_dir_writes_readme_for_default_root(
+    full_ctx: StubContext, tmp_path: Path
+) -> None:
+    """走默认输出位置（插件数据目录）时旁边会有 README.txt；配了自定义目录就不写。"""
+    plugin_data = tmp_path / 'plugin_data'
+    config = _FakeConfig(batch_agent_names=['安东'])
+    op = _new_audit_op(full_ctx, config)
+    # op 里的 ctx 是 _app_ctx 包的替身，得在它上面补这个方法
+    op.ctx.get_plugin_data_dir = lambda app_id: plugin_data  # type: ignore[attr-defined]
+
+    round_result = op.prepare_output_dir()
+
+    assert round_result.is_success
+    parent = plugin_data / 'agent_audit'
+    assert (parent / ROOT_README_FILE_NAME).exists()
+    assert op.output_root is not None
+    assert op.output_root.parent == parent
+
+    custom_dir = tmp_path / '我自己选的'
+    custom_op = _new_audit_op(
+        full_ctx, _FakeConfig(batch_agent_names=['安东'], audit_output_dir=str(custom_dir))
+    )
+
+    custom_op.prepare_output_dir()
+
+    assert not (custom_dir / ROOT_README_FILE_NAME).exists()
+
+
+# ============================= 恢复原特训目标 =============================
+
+
+def test_restore_agent_target_skips_when_empty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """进来时没读到名字就什么都不做，别瞎设一个。"""
+    from agent_charge_plan.operation import restore_agent_target as module
+
+    def boom(*args: Any, **kwargs: Any) -> None:
+        raise AssertionError('不该真的去切角色')
+
+    monkeypatch.setattr(module.ChangeAgentPlanTarget, '__init__', boom)
+
+    ok, detail = module.restore_agent_target(SimpleNamespace(), '')
+
+    assert ok is True
+    assert '跳过恢复' in detail
+
+
+def test_restore_agent_target_success(
+    full_ctx: StubContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """名字在就切回去，成功时说明里带名字。"""
+    from agent_charge_plan.operation import restore_agent_target as module
+
+    from one_dragon.base.operation.operation_base import OperationResult
+
+    monkeypatch.setattr(
+        module.ChangeAgentPlanTarget,
+        'execute',
+        lambda self: OperationResult(success=True, status='特训目标已换成 叶瞬光'),
+    )
+
+    ok, detail = module.restore_agent_target(_app_ctx(full_ctx, _FakeConfig()), '叶瞬光')
+
+    assert ok is True
+    assert '叶瞬光' in detail
+
+
+def test_restore_agent_target_reports_failure(
+    full_ctx: StubContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """切不回去也得说清楚，让用户手动改。"""
+    from agent_charge_plan.operation import restore_agent_target as module
+
+    from one_dragon.base.operation.operation_base import OperationResult
+
+    monkeypatch.setattr(
+        module.ChangeAgentPlanTarget,
+        'execute',
+        lambda self: OperationResult(success=False, status='弹窗里找不到 叶瞬光'),
+    )
+
+    ok, detail = module.restore_agent_target(_app_ctx(full_ctx, _FakeConfig()), '叶瞬光')
+
+    assert ok is False
+    assert '没能恢复' in detail
+    assert '弹窗里找不到' in detail
+
+
+def test_execute_restores_target_after_finish(
+    full_ctx: StubContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """边刷边算收尾节点会去恢复原目标，并且把报告当结果交出去。"""
+    from agent_charge_plan.operation import execute_charge_plan as module
+
+    config = _FakeConfig()
+    op = module.ExecuteChargePlan(
+        _app_ctx(full_ctx, config),
+        config=config,
+        availability=ChargeAvailability(natural=240),
+    )
+    op._init_network()
+    op.round_start_time = time.time()
+    op.original_agent_name = '叶瞬光'
+    op.book.remaining_charge = 100
+    calls: list[str] = []
+
+    def fake_restore(ctx: Any, name: str) -> tuple[bool, str]:
+        calls.append(name)
+        return True, f'特训目标已恢复为「{name}」'
+
+    monkeypatch.setattr(module, 'restore_agent_target', fake_restore)
+
+    round_result = op.restore_target()
+
+    assert calls == ['叶瞬光']
+    assert round_result.is_success
+    assert round_result.data.remaining_charge == 100
+
+
+def test_audit_restores_target_after_summary(
+    full_ctx: StubContext, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """核对收尾节点会去恢复原目标，并把汇总当结果交出去。"""
+    from agent_charge_plan.operation import audit_agents as module
+
+    config = _FakeConfig(batch_agent_names=['安东'])
+    op = _new_audit_op(full_ctx, config, output_root=tmp_path)
+    op.original_agent_name = '蕾米埃尔·丹'
+
+    def fake_restore(ctx: Any, name: str) -> tuple[bool, str]:
+        return True, f'特训目标已恢复为「{name}」'
+
+    monkeypatch.setattr(module, 'restore_agent_target', fake_restore)
+    op.write_summary()
+
+    round_result = op.restore_target()
+
+    assert round_result.is_success
+    assert isinstance(round_result.data, AuditSummary)

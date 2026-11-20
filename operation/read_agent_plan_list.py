@@ -148,7 +148,7 @@ class ReadAgentPlanList(ZOperation):
         return AgentPlanSnapshot(agent_name=self.agent_name, item_list=list(self.item_list))
 
     def _plan_list_rect(self) -> Rect:
-        """清单区矩形。主仓有就用主仓的，没有就用插件里写死的兜底坐标。"""
+        """清单区矩形，来自插件自带 screen_info；取不到会抛 LookupError。"""
         return screen_areas.get_area_rect(
             self.ctx, screen_areas.COMPENDIUM_SCREEN, screen_areas.AREA_PLAN_LIST
         )
@@ -158,7 +158,7 @@ class ReadAgentPlanList(ZOperation):
 
         滚动走 screen_areas.scroll_rect，算法和项目标准的
         one_dragon.base.screen.screen_utils.scroll_area 一样（比例 + 时长），
-        只是这里用的是兜底 Rect 而不是 ScreenArea。
+        只是这里手里是一个 Rect 而不是 ScreenArea。
 
         Args:
             downward: True 看下面的内容；False 往回滚

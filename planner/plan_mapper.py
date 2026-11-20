@@ -559,6 +559,7 @@ class PlanMapper:
         try:
             return ChargePlanConfig.validate_item(self.ctx, item)
         except Exception as error:
+            log.error('校验计划项时出错', exc_info=True)
             return f'校验时出错: {error}'
 
 

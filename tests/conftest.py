@@ -47,10 +47,10 @@ for _path in (REPO_ROOT / 'src', REPO_ROOT / 'plugins'):
 
 
 class NullScreenLoader:
-    """假装主仓 screen_info 里没有这些区域，逼被测代码走插件自带的兜底坐标。"""
+    """空区域表：用来验证「yml 里没写这个区域时」的降级行为。"""
 
     def get_area(self, screen_name: str, area_name: str) -> None:
-        """统一返回 None：主仓没定义该区域。
+        """统一返回 None：假装这块区域没配置。
 
         Args:
             screen_name: 画面名，这里不看
