@@ -35,6 +35,7 @@ from .agent_charge_plan_config import (
     GOAL_MODE_AGENT_STAGE,
     GOAL_MODE_BOTH,
     GOAL_MODE_MATERIAL_FLOOR,
+    RUN_MODE_AUDIT,
     RUN_MODE_EXECUTE,
     AgentChargePlanConfig,
 )
@@ -43,6 +44,7 @@ from .operation.agent_plan_page import (
     agent_name_similar,
     read_agent_name,
 )
+from .operation.audit_agents import AuditAgents, AuditSummary
 from .operation.change_agent_plan_target import ChangeAgentPlanTarget
 from .operation.execute_charge_plan import ExecuteChargePlan, ExecuteReport
 from .operation.goto_agent_plan import GotoAgentPlan
@@ -134,6 +136,8 @@ class AgentChargePlanApp(ZApplication):
             return self.round_success('扫描代理人名单')
         if self.config.run_mode == RUN_MODE_EXECUTE:
             return self.round_success('边刷边算')
+        if self.config.run_mode == RUN_MODE_AUDIT:
+            return self.round_success('全角色核对')
         if self.config.goal_mode == GOAL_MODE_MATERIAL_FLOOR:
             return self.round_success('只处理材料库存')
         return self.round_success('读取特训目标')
@@ -407,6 +411,8 @@ class AgentChargePlanApp(ZApplication):
 
     @node_from(from_name='循环刷本')
     @node_from(from_name='循环刷本', success=False)
+    @node_from(from_name='全角色核对')
+    @node_from(from_name='全角色核对', success=False)
     @node_notify(when=NotifyTiming.CURRENT_DONE, detail=True)
     @operation_node(name='返回大世界')
     def back_to_world(self) -> OperationRoundResult:
@@ -447,6 +453,42 @@ class AgentChargePlanApp(ZApplication):
         )
         result = op.execute()
         if isinstance(result.data, ExecuteReport):
+            for line in result.data.summary_lines():
+                log.info(line)
+        return self.round_by_op_result(result)
+
+    # ── 全角色核对（run_mode = audit）─────────────────────────────────────
+    @node_from(from_name='开始', status='全角色核对')
+    @operation_node(name='审计前准备')
+    def prepare_audit(self) -> OperationRoundResult:
+        """先进快捷手册，再读一次电量（算计划要用它做预算）。"""
+        goto_result = GotoAgentPlan(self.ctx).execute()
+        if not goto_result.success:
+            return self.round_by_op_result(goto_result)
+
+        # 导完航重新截一张：节点开头那张还停在大世界，资源栏不在屏幕上
+        self.screenshot()
+        self.execute_availability = self._read_charge_availability()
+        log.info(
+            '全角色核对开始：名单 %s 个，可用电量 %s',
+            len(self.config.batch_agent_names) or len(self.config.known_agent_list),
+            self.execute_availability.total,
+        )
+        return self.round_success(status=f'可用电量 {self.execute_availability.total}')
+
+    @node_from(from_name='审计前准备')
+    @operation_node(name='全角色核对', node_max_retry_times=1)
+    def run_audit(self) -> OperationRoundResult:
+        """全角色核对的主体：逐个切角色、读清单、算计划、落盘，最后写汇总。"""
+        op = AuditAgents(
+            self.ctx,
+            config=self.config,
+            availability=self.execute_availability,
+            instance_idx=self.instance_idx,
+            group_id=self.group_id,
+        )
+        result = op.execute()
+        if isinstance(result.data, AuditSummary):
             for line in result.data.summary_lines():
                 log.info(line)
         return self.round_by_op_result(result)

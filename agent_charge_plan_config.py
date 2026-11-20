@@ -25,6 +25,10 @@ RUN_MODE_EXECUTE: str = 'execute'
 RUN_MODE_PLAN_ONLY: str = 'plan_only'
 #: 运行模式：自己边跑边算边刷，不再需要内置体力计划
 RUN_MODE_EXECUTE: str = 'execute'
+#: 运行模式：全角色核对。遍历名单逐个读清单、算计划、落盘，不写内置体力计划配置
+RUN_MODE_AUDIT: str = 'audit'
+#: 运行模式可选值
+RUN_MODE_LIST: tuple[str, ...] = (RUN_MODE_PLAN_ONLY, RUN_MODE_EXECUTE, RUN_MODE_AUDIT)
 
 
 class AgentChargePlanConfig(ApplicationConfig):
@@ -173,9 +177,9 @@ class AgentChargePlanConfig(ApplicationConfig):
 
     @property
     def run_mode(self) -> str:
-        """运行模式：`plan_only`（只排计划，默认）/ `execute`（自己边跑边算边刷）。"""
+        """运行模式：`plan_only`（只排计划，默认）/ `execute`（自己边跑边算边刷）/ `audit`（全角色核对）。"""
         raw = self.get('run_mode', RUN_MODE_PLAN_ONLY)
-        if raw not in (RUN_MODE_PLAN_ONLY, RUN_MODE_EXECUTE):
+        if raw not in RUN_MODE_LIST:
             return RUN_MODE_PLAN_ONLY
         return raw
 
@@ -183,6 +187,23 @@ class AgentChargePlanConfig(ApplicationConfig):
     def run_mode(self, new_value: str) -> None:
         """改运行模式。写进来的值不认识就按默认的 `plan_only` 处理。"""
         self.update('run_mode', new_value)
+
+    @property
+    def audit_output_dir(self) -> str:
+        """全角色核对的结果放哪。空字符串 = 用默认位置。
+
+        默认位置是 `config/<账号>/<组>/agent_audit/<时间戳>/`，和配置放一起方便找。
+        填了就用这个目录，但仍然按时间戳再分一层，免得这次把上次的结果盖掉。
+        """
+        raw = self.get('audit_output_dir', '')
+        if not isinstance(raw, str):
+            return ''
+        return raw.strip()
+
+    @audit_output_dir.setter
+    def audit_output_dir(self, new_value: str) -> None:
+        """改核对输出目录。"""
+        self.update('audit_output_dir', new_value)
 
     @property
     def fallback_plan(self) -> dict:
