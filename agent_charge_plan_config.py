@@ -1,7 +1,6 @@
 """特训目标体力计划的配置。
 
-配置存在 config/<账号下标>/<应用组>/agent_charge_plan.yml，按账号和应用组分开。
-现在只有一个占位项，等接了读画面的逻辑再往上加。
+配置存在 `config/<账号下标>/<应用组>/agent_charge_plan.yml`，按账号和应用组分开。
 """
 
 from __future__ import annotations
@@ -9,6 +8,13 @@ from __future__ import annotations
 from one_dragon.base.operation.application.application_config import ApplicationConfig
 
 from . import agent_charge_plan_const
+
+#: 目标模式：只按角色养成缺口排计划
+GOAL_MODE_AGENT_STAGE: str = 'agent_stage'
+#: 目标模式：只按材料库存下限排计划
+GOAL_MODE_MATERIAL_FLOOR: str = 'material_floor'
+#: 目标模式：两者都要
+GOAL_MODE_BOTH: str = 'both'
 
 
 class AgentChargePlanConfig(ApplicationConfig):
@@ -25,10 +31,83 @@ class AgentChargePlanConfig(ApplicationConfig):
 
     @property
     def target_agent_name(self) -> str:
-        """要排体力计划的代理人名字。现在只是占位，业务逻辑还没接。"""
+        """要读的特训目标代理人名字。空字符串表示「用游戏里当前设的那个」。"""
         return self.get('target_agent_name', '')
 
     @target_agent_name.setter
     def target_agent_name(self, new_value: str) -> None:
         """改代理人名字，写回 YAML。"""
         self.update('target_agent_name', new_value)
+
+    @property
+    def goal_mode(self) -> str:
+        """目标模式：`agent_stage` / `material_floor` / `both`。"""
+        return self.get('goal_mode', GOAL_MODE_AGENT_STAGE)
+
+    @goal_mode.setter
+    def goal_mode(self, new_value: str) -> None:
+        """改目标模式。"""
+        self.update('goal_mode', new_value)
+
+    @property
+    def dry_run(self) -> bool:
+        """只预览不写入。默认开，避免第一次跑就把用户的计划改乱。"""
+        return self.get('dry_run', True)
+
+    @dry_run.setter
+    def dry_run(self, new_value: bool) -> None:
+        """改预览开关。"""
+        self.update('dry_run', new_value)
+
+    @property
+    def default_plan_times(self) -> int:
+        """算不出「缺口 ÷ 单次产出」时，每条计划默认排几次。"""
+        return self.get('default_plan_times', 1)
+
+    @default_plan_times.setter
+    def default_plan_times(self, new_value: int) -> None:
+        """改默认次数。"""
+        self.update('default_plan_times', new_value)
+
+    @property
+    def include_drive_disc(self) -> bool:
+        """驱动盘分组要不要一起排。
+
+        驱动盘没有库存概念（词条随机），「维持数量」对它不成立，
+        所以默认不排；想刷盘子的自己打开。
+        """
+        return self.get('include_drive_disc', False)
+
+    @include_drive_disc.setter
+    def include_drive_disc(self, new_value: bool) -> None:
+        """改驱动盘开关。"""
+        self.update('include_drive_disc', new_value)
+
+    @property
+    def material_goals(self) -> list[dict]:
+        """材料库存目标列表，每项形如 `{'material_name': '特化流明芯片', 'target_floor': 100}`。"""
+        raw = self.get('material_goals', [])
+        if not isinstance(raw, list):
+            return []
+        return [i for i in raw if isinstance(i, dict)]
+
+    @material_goals.setter
+    def material_goals(self, new_value: list[dict]) -> None:
+        """改材料目标列表。"""
+        self.update('material_goals', new_value)
+
+    @property
+    def last_generated_keys(self) -> list[str]:
+        """上一次本插件写进去的计划内容键。
+
+        下一轮用它把「缺口已经填平」的旧条目清掉，不清用户自己手工加的条目。
+        """
+        raw = self.get('last_generated_keys', [])
+        if not isinstance(raw, list):
+            return []
+        return [i for i in raw if isinstance(i, str)]
+
+    @last_generated_keys.setter
+    def last_generated_keys(self, new_value: list[str]) -> None:
+        """记下这一轮写进去的内容键。"""
+        self.update('last_generated_keys', new_value)

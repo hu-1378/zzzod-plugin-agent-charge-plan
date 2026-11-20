@@ -1,0 +1,679 @@
+"""特训目标页的数据结构、OCR 解析规则和页面判定。
+
+这个文件只放「不点屏幕」的东西：
+
+- 数据结构：一条特训目标 `AgentPlanItem`、一屏结果 `AgentPlanSnapshot`、
+  更换弹窗里的一格代理人 `DialogAgent`
+- 把 OCR 文字块拼成上面这些结构的纯函数（方便单独测试，不需要游戏）
+- 两个颜色判据：左侧分类「特训目标」是不是蓝色高亮、更换弹窗里哪一格是黄色选中框
+
+真正点屏幕的动作在 `goto_agent_plan.py` / `read_agent_plan_list.py` /
+`change_agent_plan_target.py` 里。
+"""
+
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
+
+import numpy as np
+from cv2.typing import MatLike
+
+from one_dragon.base.geometry.point import Point
+from one_dragon.base.geometry.rectangle import Rect
+from one_dragon.utils import str_utils
+
+from . import screen_areas
+
+if TYPE_CHECKING:
+    from zzz_od.context.zzz_context import ZContext
+
+
+# ============================= 解析规则里的常数 =============================
+
+#: 分组标题（代理人 / 技能 / 驱动盘，灰小字）文字框左边缘，相对清单区左边缘的横坐标上限。
+#: 实测分组标题缩进约 23px，条目名字缩进约 65px，取中间值 45 分开两者
+GROUP_HEADER_MAX_X_OFFSET: int = 45
+
+#: 电量文本（20-100 / 40 / 60）所在列，相对清单区左边缘的横坐标下限。实测在 967 左右
+CHARGE_MIN_X_OFFSET: int = 900
+
+#: 进度文本（129/290）所在列的横坐标范围。实测左边缘在 432~453
+PROGRESS_X_OFFSET_RANGE: tuple[int, int] = (350, 800)
+
+#: 「前往」按钮上的字
+GO_BUTTON_TEXT: str = '前往'
+
+#: 清单里出现过的分组标题。OCR 会把「技能」读成「按能」这类样子，靠这个列表纠正回来
+GROUP_NAME_HINT_LIST: list[str] = ['代理人', '技能', '驱动盘']
+
+#: 分组标题猜名字的相似度。只有三个候选，而且三者之间没有共同的汉字，所以放得比较松
+GROUP_NAME_MATCH_CUTOFF: float = 0.45
+
+#: 电量文本：20-100 这种区间
+_CHARGE_RANGE_PATTERN = re.compile(r'^\d{1,3}[-~－～—]\d{1,3}$')
+#: 电量文本：40 / 60 这种单个数
+_CHARGE_SINGLE_PATTERN = re.compile(r'^\d{2,3}$')
+#: 进度文本：129/290。斜杠可能被识别成各种样子
+_PROGRESS_PATTERN = re.compile(r'^\d{1,4}[/／|I]\d{1,4}$')
+#: 纯数字。进度那一条被裁掉一半时，斜杠可能被识别成数字（实测 153/203 变成 1537203）
+_DIGIT_ONLY_PATTERN = re.compile(r'^\d{1,8}$')
+
+#: 两条同名的特训目标合并时要求的相似度。
+#: 名字一般 4~6 个字，OCR 错一个字相似度还有 0.67，所以不能卡太严，否则同一屏会重复记两条
+MERGE_NAME_CUTOFF: float = 0.65
+
+# ============================= 颜色判据里的常数 =============================
+
+#: 左侧分类选中时的蓝色（BGR 三个通道的判断边界）。实测选中格约 70% 像素是蓝色，未选中约 0%
+_HIGHLIGHT_BLUE_MIN: int = 170
+_HIGHLIGHT_GREEN_MIN: int = 80
+_HIGHLIGHT_GREEN_MAX: int = 170
+_HIGHLIGHT_RED_MAX: int = 120
+_HIGHLIGHT_BLUE_RED_GAP: int = 90
+#: 蓝色像素占区域的比例达到这个值就算选中
+HIGHLIGHT_BLUE_MIN_RATIO: float = 0.3
+
+#: 弹窗里选中格的黄色描边（BGR 判断边界）。实测描边约 RGB(230, 215, 80)
+_FRAME_RED_MIN: int = 180
+_FRAME_GREEN_MIN: int = 160
+_FRAME_BLUE_MAX: int = 120
+_FRAME_RED_BLUE_GAP: int = 90
+
+#: 找黄色描边时，把代理人网格区域四周多放开多少像素（描边画在格子外沿，会被网格区域切掉）
+SELECTED_FRAME_PAD: int = 40
+#: 描边竖边至少连续多少像素。实测约 200，格子里的稀有度角标（S）只有 30 左右
+SELECTED_FRAME_MIN_VERTICAL_RUN: int = 80
+#: 描边横边至少要占竖边之间宽度的多少比例。实测描边有圆角，160/185 ≈ 0.86
+SELECTED_FRAME_HORIZONTAL_RUN_RATIO: float = 0.6
+#: 选中格子至少多宽多高，用来挡掉误检
+SELECTED_FRAME_MIN_WIDTH: int = 120
+SELECTED_FRAME_MIN_HEIGHT: int = 150
+
+# ============================= 更换弹窗的解析规则 =============================
+
+#: 代理人名字框的最小高度。名字大约 26~35px 高，网格里的杂字（如「已过」）只有 13px
+DIALOG_NAME_MIN_HEIGHT: int = 18
+#: 点代理人时，从名字框中心往上挪多少像素（头像在名字上方）
+DIALOG_NAME_CLICK_OFFSET: int = 80
+#: 弹窗里找目标代理人时要求的相似度。名字 3 个字、OCR 错一个还有 0.67，所以卡 0.6；
+#: 真点错了后面「确认切换结果」会拿页面上的角色名再核对一次
+DIALOG_NAME_MATCH_CUTOFF: float = 0.6
+#: 弹窗里的按钮文字，不是代理人名字
+_DIALOG_NOT_AGENT_TEXT_LIST: list[str] = ['特训方案', '清除目标', '更换特训目标', '取消', '确认']
+#: Lv.60 这种等级文字，要丢掉
+_LEVEL_PATTERN = re.compile(r'^lv\.', re.IGNORECASE)
+
+
+# ============================= 数据结构 =============================
+
+
+@dataclass
+class TextBlock:
+    """一块 OCR 出来的文字和它在整张截图上的位置。"""
+
+    text: str
+    rect: Rect
+
+
+@dataclass
+class AgentPlanItem:
+    """特训目标清单里的一条。"""
+
+    #: 所属分组名：代理人 / 技能 / 驱动盘
+    group_name: str
+    #: 条目名，例如「调查员记录」「代理人技能」「猎人与忠犬」
+    name: str
+    #: 右侧电量文本，三种形态：20-100（实战模拟室，按张卡算）/ 40（专业挑战室）/ 60（区域巡防、恶名狩猎）
+    charge_text: str = ''
+    #: 进度文本，例如 129/290。驱动盘分组没有进度条，这里就是 None
+    progress_text: str | None = None
+    #: 进度里已完成的数。文本解析不出来时是 None
+    progress_current: int | None = None
+    #: 进度里要求的数。文本解析不出来时是 None
+    progress_total: int | None = None
+    #: 条目名字框的中心点，代表这一条在屏幕上的位置
+    center: Point = field(default_factory=lambda: Point(0, 0))
+    #: 「前往」按钮的中心点。这一条被裁掉一半、按钮没识别到时是 None
+    go_button_center: Point | None = None
+
+    @property
+    def is_finished(self) -> bool:
+        """进度是否已经满了。没有进度条的条目（驱动盘分组）一律算没满。"""
+        if self.progress_current is None or self.progress_total is None:
+            return False
+        return self.progress_current >= self.progress_total
+
+
+@dataclass
+class AgentPlanSnapshot:
+    """一整个特训目标页读下来的结果。"""
+
+    #: 顶部角色卡上的代理人名字
+    agent_name: str
+    #: 清单里的全部条目，按阅读顺序（从上到下）
+    item_list: list[AgentPlanItem] = field(default_factory=list)
+
+
+@dataclass
+class DialogAgent:
+    """更换特训目标弹窗里的一格代理人。"""
+
+    #: 代理人名字（OCR 文本，不查枚举，游戏里可能有项目里没有的角色）
+    name: str
+    #: 名字文字框
+    name_rect: Rect
+
+    def click_point(self) -> Point:
+        """要点的位置：名字框中心往上挪一点，因为头像在名字上面。"""
+        return Point(self.name_rect.center.x, self.name_rect.center.y - DIALOG_NAME_CLICK_OFFSET)
+
+
+# ============================= OCR =============================
+
+
+def read_text_blocks(ctx: ZContext, screen: MatLike, area: Rect) -> list[TextBlock]:
+    """把一个区域里的文字全部 OCR 出来，坐标换算成整张截图上的坐标。
+
+    Args:
+        ctx: 一条龙上下文
+        screen: 游戏截图
+        area: 要识别的区域
+
+    Returns:
+        文字块列表，未排序
+    """
+    result_map = ctx.ocr.crop_and_run_ocr(screen, area)
+    block_list: list[TextBlock] = []
+    for text, match_result_list in result_map.items():
+        for match_result in match_result_list:
+            rect = match_result.rect
+            rect.add_offset(area.left_top)
+            block_list.append(TextBlock(text=text, rect=rect))
+    return block_list
+
+
+def read_agent_name(ctx: ZContext, screen: MatLike) -> str:
+    """读顶部角色卡上的代理人名字。读不到返回空字符串。
+
+    Args:
+        ctx: 一条龙上下文
+        screen: 游戏截图
+
+    Returns:
+        代理人名字，读不到就是空字符串
+    """
+    area = screen_areas.get_area_rect(
+        ctx, screen_areas.COMPENDIUM_SCREEN, screen_areas.AREA_AGENT_NAME
+    )
+    block_list = read_text_blocks(ctx, screen, area)
+    return pick_agent_name(block_list)
+
+
+def pick_agent_name(block_list: list[TextBlock]) -> str:
+    """从角色名区域的文字块里挑出名字：取含中文且最长的那块。
+
+    Args:
+        block_list: 角色名区域的文字块
+
+    Returns:
+        代理人名字，挑不到就是空字符串
+    """
+    name: str = ''
+    for block in block_list:
+        text = _normalize_text(block.text)
+        if not str_utils.with_chinese(text):
+            continue
+        if len(text) > len(name):
+            name = text
+    return name
+
+
+# ============================= 清单解析 =============================
+
+
+def parse_plan_items(block_list: list[TextBlock], area: Rect) -> list[AgentPlanItem]:
+    """把清单区的 OCR 文字块拼成条目列表。
+
+    拼法：按 y 从上往下走一遍，遇到名字就开一条新条目，后面的电量、进度、前往按钮
+    都算这一条的。滚到一半被裁掉的行只有零散数字、没有名字，会被自动丢掉。
+
+    Args:
+        block_list: 清单区的文字块（整张截图的坐标）
+        area: 清单区矩形，用来算文字框相对左边缩进了多少
+
+    Returns:
+        条目列表，按阅读顺序
+    """
+    item_list: list[AgentPlanItem] = []
+    group_name: str = ''
+    current: AgentPlanItem | None = None
+
+    for block in sorted(block_list, key=lambda b: (b.rect.center.y, b.rect.x1)):
+        kind = classify_text_block(block, area)
+        if kind == 'group':
+            group_name = normalize_group_name(block.text)
+            current = None
+        elif kind == 'name':
+            current = AgentPlanItem(
+                group_name=group_name,
+                name=_normalize_text(block.text),
+                center=block.rect.center,
+            )
+            item_list.append(current)
+        elif kind == 'charge' and current is not None:
+            current.charge_text = _normalize_text(block.text)
+        elif kind == 'progress' and current is not None:
+            current.progress_text = _normalize_text(block.text)
+            done, total = parse_progress_text(current.progress_text)
+            current.progress_current = done
+            current.progress_total = total
+        elif kind == 'go' and current is not None:
+            current.go_button_center = block.rect.center
+
+    return item_list
+
+
+def classify_text_block(block: TextBlock, area: Rect) -> str:
+    """判断一块文字属于清单里的哪种东西。
+
+    Args:
+        block: 文字块
+        area: 清单区矩形
+
+    Returns:
+        group（分组标题）/ name（条目名）/ charge（电量）/ progress（进度）/ go（前往按钮）/ other（不认识）
+    """
+    text = _normalize_text(block.text)
+    if not text:
+        return 'other'
+
+    if str_utils.find_by_lcs(GO_BUTTON_TEXT, text, percent=0.5) and len(text) <= 4:
+        return 'go'
+
+    x_offset = block.rect.x1 - area.x1
+
+    if _CHARGE_RANGE_PATTERN.match(text) and x_offset >= CHARGE_MIN_X_OFFSET:
+        return 'charge'
+    if _CHARGE_SINGLE_PATTERN.match(text) and x_offset >= CHARGE_MIN_X_OFFSET:
+        return 'charge'
+
+    in_progress_column = (
+        PROGRESS_X_OFFSET_RANGE[0] <= x_offset <= PROGRESS_X_OFFSET_RANGE[1]
+    )
+    if in_progress_column and _PROGRESS_PATTERN.match(text):
+        return 'progress'
+    if in_progress_column and _DIGIT_ONLY_PATTERN.match(text):
+        return 'progress'
+
+    if x_offset < GROUP_HEADER_MAX_X_OFFSET:
+        return 'group'
+    if text in GROUP_NAME_HINT_LIST:
+        return 'group'
+
+    if str_utils.with_chinese(text):
+        return 'name'
+    if _DIGIT_ONLY_PATTERN.match(text):
+        return 'other'
+    return 'name'
+
+
+def normalize_group_name(text: str) -> str:
+    """把分组标题的 OCR 文本对到已知的三个分组名上。
+
+    OCR 常把「技能」读成「按能」这类样子，直接拿去用的话后面没法映射成副本。
+    对不上三个已知分组就原样返回，让上层按未知分组处理。
+
+    Args:
+        text: OCR 出来的分组标题
+
+    Returns:
+        纠正后的分组名
+    """
+    name = _normalize_text(text)
+    if not name:
+        return ''
+    idx = str_utils.find_best_match_by_difflib(
+        name, GROUP_NAME_HINT_LIST, cutoff=GROUP_NAME_MATCH_CUTOFF
+    )
+    if idx is None:
+        return name
+    return GROUP_NAME_HINT_LIST[idx]
+
+
+def parse_progress_text(text: str | None) -> tuple[int | None, int | None]:
+    """把 129/290 这样的进度文本拆成两个数。拆不出来返回 (None, None)。
+
+    Args:
+        text: 进度文本
+
+    Returns:
+        (已完成, 要求总数)
+    """
+    if text is None:
+        return None, None
+    normalized = _normalize_text(text)
+    match = _PROGRESS_PATTERN.match(normalized)
+    if match is None:
+        return None, None
+    parts = re.split(r'[/／|I]', normalized)
+    if len(parts) != 2:
+        return None, None
+    try:
+        return int(parts[0]), int(parts[1])
+    except ValueError:
+        return None, None
+
+
+def merge_item_list(
+    old_list: list[AgentPlanItem], new_list: list[AgentPlanItem]
+) -> tuple[list[AgentPlanItem], int]:
+    """把新读到的一屏合并进已经收到的总表里。
+
+    同名条目不重复添加，只把这次多读到的信息（电量、进度、按钮位置）补上去。
+
+    Args:
+        old_list: 之前累计的条目
+        new_list: 这一屏读到的条目
+
+    Returns:
+        (合并后的条目列表, 这次新增了几条)。新增 0 条说明已经滚到底了
+    """
+    merged: list[AgentPlanItem] = list(old_list)
+    name_list: list[str] = [item.name for item in merged]
+    new_count: int = 0
+
+    for item in new_list:
+        idx = str_utils.find_in_list_with_fuzzy(item.name, name_list, cutoff=MERGE_NAME_CUTOFF)
+        if idx is None:
+            merged.append(item)
+            name_list.append(item.name)
+            new_count += 1
+            continue
+        _fill_item(merged[idx], item)
+
+    return merged, new_count
+
+
+def _fill_item(target: AgentPlanItem, source: AgentPlanItem) -> None:
+    """把 source 里有、target 里没有的信息补到 target 上。
+
+    Args:
+        target: 已经存在的条目
+        source: 这一屏重新读到的同一个条目
+    """
+    if not target.charge_text and source.charge_text:
+        target.charge_text = source.charge_text
+    if target.progress_current is None and source.progress_current is not None:
+        target.progress_current = source.progress_current
+        target.progress_total = source.progress_total
+        target.progress_text = source.progress_text
+    elif target.progress_text is None and source.progress_text is not None:
+        target.progress_text = source.progress_text
+    if not target.group_name and source.group_name:
+        target.group_name = source.group_name
+    target.center = source.center
+    if source.go_button_center is not None:
+        target.go_button_center = source.go_button_center
+
+
+# ============================= 更换弹窗解析 =============================
+
+
+def parse_dialog_agents(block_list: list[TextBlock]) -> list[DialogAgent]:
+    """把更换弹窗里代理人网格的 OCR 文字块拼成代理人列表。
+
+    丢弃规则：Lv.60 这种等级文字、按钮文字、以及方格里去不掉的角标杂字（高度太矮）。
+
+    Args:
+        block_list: 网格区域的文字块
+
+    Returns:
+        代理人列表，按阅读顺序
+    """
+    agent_list: list[DialogAgent] = []
+    for block in sorted(block_list, key=lambda b: (b.rect.center.y, b.rect.x1)):
+        if not is_dialog_agent_name(block):
+            continue
+        agent_list.append(DialogAgent(name=_normalize_text(block.text), name_rect=block.rect))
+    return agent_list
+
+
+def is_dialog_agent_name(block: TextBlock) -> bool:
+    """这块文字是不是一个代理人名字。
+
+    Args:
+        block: 文字块
+
+    Returns:
+        是代理人名字就是 True
+    """
+    text = _normalize_text(block.text)
+    if not text:
+        return False
+    if _LEVEL_PATTERN.match(text):
+        return False
+    if text in _DIALOG_NOT_AGENT_TEXT_LIST:
+        return False
+    if block.rect.height < DIALOG_NAME_MIN_HEIGHT:
+        return False
+    if _DIGIT_ONLY_PATTERN.match(text):
+        return False
+    return str_utils.with_chinese(text)
+
+
+def find_dialog_agent(block_list: list[TextBlock],
+                      target_name: str) -> DialogAgent | None:
+    """在网格里找目标代理人。
+
+    Args:
+        block_list: 网格区域的文字块
+        target_name: 要找的代理人名字
+
+    Returns:
+        找到的代理人，找不到就是 None
+    """
+    agent_list = parse_dialog_agents(block_list)
+    name_list = [agent.name for agent in agent_list]
+    idx = str_utils.find_in_list_with_fuzzy(
+        target_name, name_list, cutoff=DIALOG_NAME_MATCH_CUTOFF
+    )
+    if idx is None:
+        return None
+    return agent_list[idx]
+
+
+def agent_name_similar(current: str, target: str) -> bool:
+    """两个代理人名字是不是同一个人。
+
+    按 OCR 文本比，不查项目里的角色枚举（游戏可能有枚举里没有的新角色）。
+    目标名常常是简称（比如只写「安东」），所以包含关系也算命中。
+
+    Args:
+        current: 画面上读到的名字
+        target: 想要的名字
+
+    Returns:
+        认为是同一个人就是 True
+    """
+    a = _normalize_agent_name(current)
+    b = _normalize_agent_name(target)
+    if not a or not b:
+        return False
+    if a == b or a in b or b in a:
+        return True
+    return str_utils.find_best_match_by_difflib(a, [b], cutoff=0.6) is not None
+
+
+# ============================= 颜色判据 =============================
+
+
+def is_blue_highlight(screen: MatLike, rect: Rect) -> bool:
+    """这个区域是不是被蓝色高亮（左侧分类选中时的样子）。
+
+    Args:
+        screen: 游戏截图（BGR）
+        rect: 区域
+
+    Returns:
+        蓝色像素够多就是 True
+    """
+    part = screen[rect.y1:rect.y2, rect.x1:rect.x2]
+    if part.size == 0:
+        return False
+    blue = part[:, :, 0].astype(int)
+    green = part[:, :, 1].astype(int)
+    red = part[:, :, 2].astype(int)
+    mask = (
+        (blue > _HIGHLIGHT_BLUE_MIN)
+        & (green > _HIGHLIGHT_GREEN_MIN)
+        & (green < _HIGHLIGHT_GREEN_MAX)
+        & (red < _HIGHLIGHT_RED_MAX)
+        & ((blue - red) > _HIGHLIGHT_BLUE_RED_GAP)
+    )
+    return float(mask.mean()) >= HIGHLIGHT_BLUE_MIN_RATIO
+
+
+def find_selected_cell_rect(screen: MatLike, area: Rect) -> Rect | None:
+    """在代理人网格里找黄色选中框，返回被框住的那一格的位置。
+
+    做法：先按颜色挑出黄色像素，再找长得像描边的竖边和横边——
+    竖边要连续 80px 以上（稀有度角标只有 30 左右，会被排除掉）。
+
+    Args:
+        screen: 游戏截图（BGR）
+        area: 代理人网格区域
+
+    Returns:
+        选中格子的矩形，判断不出来就是 None
+    """
+    height, width = screen.shape[0], screen.shape[1]
+    left = max(0, area.x1 - SELECTED_FRAME_PAD)
+    top = max(0, area.y1 - SELECTED_FRAME_PAD)
+    right = min(width, area.x2 + SELECTED_FRAME_PAD)
+    bottom = min(height, area.y2 + SELECTED_FRAME_PAD)
+
+    part = screen[top:bottom, left:right]
+    if part.size == 0:
+        return None
+
+    red = part[:, :, 2].astype(int)
+    green = part[:, :, 1].astype(int)
+    blue = part[:, :, 0].astype(int)
+    mask = (
+        (red > _FRAME_RED_MIN)
+        & (green > _FRAME_GREEN_MIN)
+        & (blue < _FRAME_BLUE_MAX)
+        & ((red - blue) > _FRAME_RED_BLUE_GAP)
+    )
+
+    col_list = np.nonzero(
+        _has_run(mask, SELECTED_FRAME_MIN_VERTICAL_RUN, axis=0)
+    )[0]
+    if len(col_list) < 2:
+        return None
+    x_lo = int(col_list.min())
+    x_hi = int(col_list.max())
+    cell_width = x_hi - x_lo
+    if cell_width < SELECTED_FRAME_MIN_WIDTH:
+        return None
+
+    need_run = max(1, int(cell_width * SELECTED_FRAME_HORIZONTAL_RUN_RATIO))
+    row_list = np.nonzero(
+        _has_run(mask[:, x_lo:x_hi + 1], need_run, axis=1)
+    )[0]
+    if len(row_list) < 2:
+        return None
+    y_lo = int(row_list.min())
+    y_hi = int(row_list.max())
+    if (y_hi - y_lo) < SELECTED_FRAME_MIN_HEIGHT:
+        return None
+
+    return Rect(left + x_lo, top + y_lo, left + x_hi, top + y_hi)
+
+
+def _has_run(mask: np.ndarray, run_length: int, axis: int) -> np.ndarray:
+    """每一行（或每一列）里有没有一段长度达到 run_length 的连续 True。
+
+    Args:
+        mask: 布尔矩阵
+        run_length: 要求的最短连续长度
+        axis: 0 表示沿着列方向数（判断每一列），1 表示沿着行方向数（判断每一行）
+
+    Returns:
+        每个列（或行）一个布尔值
+    """
+    work = mask.astype(np.int32)
+    if axis == 0:
+        work = work.T
+    if work.shape[1] < run_length:
+        return np.zeros(work.shape[0], dtype=bool)
+    zero_row = np.zeros((work.shape[0], 1), dtype=np.int32)
+    cum = np.concatenate([zero_row, np.cumsum(work, axis=1)], axis=1)
+    hit = (cum[:, run_length:] - cum[:, :-run_length]) == run_length
+    return hit.any(axis=1)
+
+
+def is_agent_plan_page(ctx: ZContext, screen: MatLike) -> bool:
+    """现在是不是停在「快捷手册-训练-特训目标」页。
+
+    主判据：左侧分类「特训目标」是蓝色高亮（选中态）。
+    兜底判据：角色卡上的「更换特训目标」按钮文字，这个按钮只有这一页有。
+
+    不拿「清单区有内容」当判据——养成方案详情页的同一块位置也有字，会误判成特训目标页。
+    没设特训目标时页面是空态的，这时只能靠左侧分类的高亮认出来。
+
+    Args:
+        ctx: 一条龙上下文
+        screen: 游戏截图
+
+    Returns:
+        在特训目标页就是 True
+    """
+    cat_rect = screen_areas.get_area_rect(
+        ctx, screen_areas.COMPENDIUM_SCREEN, screen_areas.AREA_LEFT_CAT_TARGET
+    )
+    if is_blue_highlight(screen, cat_rect):
+        return True
+
+    button_rect = screen_areas.get_area_rect(
+        ctx, screen_areas.COMPENDIUM_SCREEN, screen_areas.AREA_CHANGE_TARGET
+    )
+    return has_text(ctx, screen, button_rect, '更换特训目标')
+
+
+def has_text(ctx: ZContext, screen: MatLike, area: Rect, target: str,
+             lcs_percent: float = 0.6) -> bool:
+    """区域内有没有出现某段文字（按最长公共子序列比，容忍 OCR 少量错字）。
+
+    Args:
+        ctx: 一条龙上下文
+        screen: 游戏截图
+        area: 区域
+        target: 想找的文字
+        lcs_percent: 最短公共子序列要占目标文字长度的比例
+
+    Returns:
+        找到就是 True
+    """
+    for block in read_text_blocks(ctx, screen, area):
+        if str_utils.find_by_lcs(target, block.text, percent=lcs_percent):
+            return True
+    return False
+
+
+# ============================= 小工具 =============================
+
+
+def _normalize_text(text: str) -> str:
+    """去掉空白字符。OCR 出来的 129 / 290 想当 129/290 用。"""
+    return str_utils.remove_whitespace(text)
+
+
+def _normalize_agent_name(name: str) -> str:
+    """代理人名字比较前先去掉空白和间隔号，避免「安东·伊万诺夫」和「安东伊万诺夫」比不上。"""
+    text = _normalize_text(name)
+    for ch in ('·', '・', '•'):
+        text = text.replace(ch, '')
+    return text

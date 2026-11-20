@@ -24,6 +24,8 @@ if TYPE_CHECKING:
 
 #: 画面对应主仓 `assets/game_data/screen_info/compendium.yml` 的 screen_name
 COMPENDIUM_SCREEN: str = '快捷手册'
+#: 训练 TAB 对应的画面（主仓 `compendium_training.yml` 的 screen_name），特训目标页在这个 TAB 下
+COMPENDIUM_TRAINING_SCREEN: str = '快捷手册-训练'
 
 #: 训练 TAB 左侧分类里「特训目标」那一格（选中时是蓝底）
 AREA_LEFT_CAT_TARGET: str = '区域-分类-特训目标'
