@@ -111,3 +111,42 @@ class AgentChargePlanConfig(ApplicationConfig):
     def last_generated_keys(self, new_value: list[str]) -> None:
         """记下这一轮写进去的内容键。"""
         self.update('last_generated_keys', new_value)
+
+    @property
+    def scan_only(self) -> bool:
+        """只扫描代理人名单、不生成计划。打开后跑一次就能把 known_agent_list 刷出来。"""
+        return self.get('scan_only', False)
+
+    @scan_only.setter
+    def scan_only(self, new_value: bool) -> None:
+        """改扫描模式开关。"""
+        self.update('scan_only', new_value)
+
+    @property
+    def known_agent_list(self) -> list[str]:
+        """游戏里扫到的全部代理人名字，按弹窗顺序。扫描模式跑一次就会写进这里。"""
+        raw = self.get('known_agent_list', [])
+        if not isinstance(raw, list):
+            return []
+        return [i for i in raw if isinstance(i, str)]
+
+    @known_agent_list.setter
+    def known_agent_list(self, new_value: list[str]) -> None:
+        """记下扫到的代理人名单。"""
+        self.update('known_agent_list', new_value)
+
+    @property
+    def batch_agent_names(self) -> list[str]:
+        """要批量配置的角色名单。空 = 只处理 `target_agent_name`（或游戏当前目标）。
+
+        游戏只能设一个特训目标，所以这里多选之后要逐个切过去读一遍。
+        """
+        raw = self.get('batch_agent_names', [])
+        if not isinstance(raw, list):
+            return []
+        return [i for i in raw if isinstance(i, str) and i.strip()]
+
+    @batch_agent_names.setter
+    def batch_agent_names(self, new_value: list[str]) -> None:
+        """改批量名单。"""
+        self.update('batch_agent_names', new_value)

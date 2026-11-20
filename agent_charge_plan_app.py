@@ -152,7 +152,7 @@ class AgentChargePlanApp(ZApplication):
         """读特训目标页的条目：分组、条目名、电量、进度。"""
         op = ReadAgentPlanList(self.ctx, goto_first=False)
         result = op.execute()
-        if not result.is_success:
+        if not result.success:
             return self.round_by_op_result(result)
 
         snapshot = op.data
@@ -218,7 +218,7 @@ class AgentChargePlanApp(ZApplication):
             prefer_dialog=prefer_dialog,
         )
         result = op.execute()
-        if not result.is_success:
+        if not result.success:
             # 读不到不算致命，照常往下走，只是少了材料这一档
             log.warning('材料缺口没读出来：%s', result.status)
             return self.round_success('材料缺口没读到')
