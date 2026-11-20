@@ -30,9 +30,11 @@ BACK_TO_TOP_TIMES: int = 6
 #: 往下最多滚几次。防止界面异常时死循环
 MAX_SCROLL_TIMES: int = 12
 #: 拖拽时离清单区上下边缘留多少像素
-SCROLL_MARGIN: int = 60
-#: 滚动后等界面停稳的时间（秒）
-SCROLL_WAIT: float = 0.8
+SCROLL_MARGIN: int = 90
+#: 拖拽全程耗时。调大 = 滑得慢一点，更容易控制距离
+SCROLL_DRAG_SECONDS: float = 0.9
+#: 滚动后等界面停稳的时间（秒）。太短会在惯性还没停时截图
+SCROLL_WAIT: float = 1.2
 #: 回顶部时每次拖完等一下界面（秒）
 SCROLL_SETTLE: float = 0.3
 
@@ -161,9 +163,9 @@ class ReadAgentPlanList(ZOperation):
         top: Point = Point(x, area.y1 + SCROLL_MARGIN)
         bottom: Point = Point(x, area.y2 - SCROLL_MARGIN)
         if downward:
-            self.ctx.controller.drag_to(start=bottom, end=top)
+            self.ctx.controller.drag_to(start=bottom, end=top, duration=SCROLL_DRAG_SECONDS)
         else:
-            self.ctx.controller.drag_to(start=top, end=bottom)
+            self.ctx.controller.drag_to(start=top, end=bottom, duration=SCROLL_DRAG_SECONDS)
 
 
 def __debug() -> None:
