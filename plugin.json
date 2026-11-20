@@ -1,0 +1,23 @@
+{
+  "id": "agent_charge_plan",
+  "name": "特训目标体力计划",
+  "summary": "读取游戏自带「特训目标」页面的养成缺口，自动翻译成体力计划项，交给内置体力计划应用去刷。当前是骨架版本，还不读画面也不生成计划。",
+  "version": "0.1.0",
+  "versionCode": 1,
+  "defaultGroup": false,
+  "needNotify": true,
+  "author": {
+    "name": "HeiSha",
+    "url": "https://github.com/hu-1378"
+  },
+  "homepage": "https://github.com/hu-1378/zzzod-plugin-agent-charge-plan",
+  "risk": [
+    "automation"
+  ],
+  "compatibility": {
+    "minAppVersion": "0.0.0",
+    "minCoreApiVersion": 1,
+    "python": ">=3.11"
+  },
+  "cover": "assets/ui/cover.png"
+}

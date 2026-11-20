@@ -1,0 +1,153 @@
+screen_id: material_calc_dialog
+screen_name: 养成材料计算
+pc_alt: false
+area_list:
+# 弹窗标题，用作文本锚点判断「养成材料计算」弹窗已打开
+- area_name: 标题-养成材料计算
+  id_mark: true
+  pc_rect:
+  - 430
+  - 100
+  - 700
+  - 165
+  text: 养成材料计算
+  lcs_percent: 0.5
+  template_sub_dir: ''
+  template_id: ''
+  template_match_threshold: 0.7
+  color_range: null
+  goto_list: []
+- area_name: 按钮-关闭
+  id_mark: false
+  pc_rect:
+  - 1410
+  - 100
+  - 1490
+  - 165
+  text: ''
+  lcs_percent: 0.5
+  template_sub_dir: ''
+  template_id: ''
+  template_match_threshold: 0.7
+  color_range: null
+  goto_list: []
+- area_name: 按钮-重置
+  id_mark: false
+  pc_rect:
+  - 570
+  - 900
+  - 950
+  - 975
+  text: 重置
+  lcs_percent: 0.5
+  template_sub_dir: ''
+  template_id: ''
+  template_match_threshold: 0.7
+  color_range: null
+  goto_list: []
+- area_name: 按钮-确定
+  id_mark: false
+  pc_rect:
+  - 975
+  - 895
+  - 1390
+  - 980
+  text: 确定
+  lcs_percent: 0.5
+  template_sub_dir: ''
+  template_id: ''
+  template_match_threshold: 0.7
+  color_range: null
+  goto_list: []
+# 结果页一：图标横排。带数字的表示仍需获取（如 75 / 140），
+# 没有数字、显示「已满足」的表示已达标。用于快速判断有没有缺口。
+- area_name: 区域-需要获取的材料
+  id_mark: false
+  pc_rect:
+  - 460
+  - 245
+  - 1270
+  - 470
+  text: 需要获取的材料
+  lcs_percent: 0.5
+  template_sub_dir: ''
+  template_id: ''
+  template_match_threshold: 0.7
+  color_range: null
+  goto_list: []
+# 结果页二：「养成材料明细」四列表。列 x 固定，行 y 随滚动变化。
+# 表头：养成材料 | 所需 | 已有 | 仍需获取
+# 行尾「仍需获取」列：黄字 = 缺口数量，绿色对勾 = 已满足。
+- area_name: 区域-明细表
+  id_mark: false
+  pc_rect:
+  - 490
+  - 245
+  - 1480
+  - 1010
+  text: ''
+  lcs_percent: 0.5
+  template_sub_dir: ''
+  template_id: ''
+  template_match_threshold: 0.7
+  color_range: null
+  goto_list: []
+- area_name: 列-材料名
+  id_mark: false
+  pc_rect:
+  - 500
+  - 245
+  - 950
+  - 1010
+  text: ''
+  lcs_percent: 0.5
+  template_sub_dir: ''
+  template_id: ''
+  template_match_threshold: 0.7
+  color_range: null
+  goto_list: []
+- area_name: 列-所需
+  id_mark: false
+  pc_rect:
+  - 990
+  - 245
+  - 1120
+  - 1010
+  text: ''
+  lcs_percent: 0.5
+  template_sub_dir: ''
+  template_id: ''
+  template_match_threshold: 0.7
+  color_range: null
+  goto_list: []
+- area_name: 列-已有
+  id_mark: false
+  pc_rect:
+  - 1150
+  - 245
+  - 1290
+  - 1010
+  text: ''
+  lcs_percent: 0.5
+  template_sub_dir: ''
+  template_id: ''
+  template_match_threshold: 0.7
+  color_range: null
+  goto_list: []
+- area_name: 列-仍需获取
+  id_mark: false
+  pc_rect:
+  - 1300
+  - 245
+  - 1470
+  - 1010
+  text: ''
+  lcs_percent: 0.5
+  template_sub_dir: ''
+  template_id: ''
+  template_match_threshold: 0.7
+  color_range: null
+  goto_list: []
+# 说明：设置界面（代理人等级 / 5 个技能滑块 / 音擎选填）的区域尚未建档，
+# 首版固定用游戏默认的「智能计算」直接点「确定」，只读结果页。
+# 需要「自定义计算」（自由设目标等级、指定音擎）时再补这部分区域。

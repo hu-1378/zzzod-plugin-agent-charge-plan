@@ -1,0 +1,79 @@
+screen_id: agent_guide_overview
+screen_name: 养成方案-详情
+pc_alt: false
+area_list:
+# 页面锚点：左上角「更多方案」按钮，只有本页面有
+- area_name: 按钮-更多方案
+  id_mark: true
+  pc_rect:
+  - 190
+  - 22
+  - 412
+  - 82
+  text: 更多方案
+  lcs_percent: 0.5
+  template_sub_dir: ''
+  template_id: ''
+  template_match_threshold: 0.7
+  color_range: null
+  goto_list: []
+# 蓝色横幅上的代理人名字，白色粗体
+- area_name: 区域-角色名
+  id_mark: false
+  pc_rect:
+  - 120
+  - 133
+  - 360
+  - 187
+  text: ''
+  lcs_percent: 0.5
+  template_sub_dir: ''
+  template_id: ''
+  template_match_threshold: 0.7
+  color_range: null
+  goto_list: []
+# 右侧「材料预览」面板：每行是「材料图标 + 进度条 [已有/所需] + 获取/养成按钮」。
+# 进度条文本形如 60/159（行首无空格）、83/33（已满足时是白底黄字）、
+# 8772526/320000（丁尼，数字很长）。这一栏是同页面最省事的缺口来源。
+- area_name: 区域-材料预览
+  id_mark: false
+  pc_rect:
+  - 1145
+  - 108
+  - 1815
+  - 1010
+  text: ''
+  lcs_percent: 0.5
+  template_sub_dir: ''
+  template_id: ''
+  template_match_threshold: 0.7
+  color_range: null
+  goto_list: []
+- area_name: 按钮-快速设置
+  id_mark: false
+  pc_rect:
+  - 1215
+  - 945
+  - 1400
+  - 1005
+  text: 快速设置
+  lcs_percent: 0.5
+  template_sub_dir: ''
+  template_id: ''
+  template_match_threshold: 0.7
+  color_range: null
+  goto_list: []
+- area_name: 按钮-设置为目标
+  id_mark: false
+  pc_rect:
+  - 1520
+  - 945
+  - 1730
+  - 1005
+  text: 设置为目标
+  lcs_percent: 0.5
+  template_sub_dir: ''
+  template_id: ''
+  template_match_threshold: 0.7
+  color_range: null
+  goto_list: []
