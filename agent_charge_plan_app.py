@@ -7,8 +7,8 @@
 
 三种目标模式（配置 `goal_mode`）：
 
-- `agent_stage`：按角色养成缺口排计划（完整可用）
-- `material_floor`：按材料库存下限排计划（**目前只读不排**，原因见 `read_material_gap`）
+- `agent_stage`：按角色养成缺口排计划
+- `material_floor`：按材料库存下限排计划（缺口从「养成材料计算」的明细表读，要配 `material_goals`）
 - `both`：两者都做
 """
 
@@ -41,7 +41,12 @@ from .operation.goto_agent_plan import GotoAgentPlan
 from .operation.read_agent_plan_list import ReadAgentPlanList
 from .operation.read_material_calc import MaterialGapSnapshot, ReadMaterialCalc
 from .planner.charge_budget import ChargeAvailability
-from .planner.material_goal import MaterialGoal, MaterialGoalPlanner, MaterialOwned
+from .planner.material_goal import (
+    MaterialGoal,
+    MaterialGoalPlanner,
+    MaterialOwned,
+    normalize_material_name,
+)
 from .planner.plan_mapper import PlanMapper
 from .planner.plan_models import PlanSnapshot
 from .planner.plan_writer import PlanWriter, content_key
@@ -177,11 +182,10 @@ class AgentChargePlanApp(ZApplication):
     @node_from(from_name='读取电量')
     @operation_node(name='读取材料缺口', node_max_retry_times=1)
     def read_material_gap(self) -> OperationRoundResult:
-        """读养成方案详情页右侧的材料预览栏。
+        """读材料缺口：先读养成方案详情右侧的材料预览栏，读空再走「养成指南 → 养成材料计算」弹窗。
 
-        **目前只读不排计划**：这一栏只有图标和「已有/所需」数字，没有材料名字，
-        对不到材料表就换不算出次数。要真正按材料排计划，得先补其中一样：
-        材料图标模板，或者「养成指南 → 养成材料计算」那页的建档（明细表有名字）。
+        预览栏只有图标和数字、没有材料名，拿到也没法换算成刷本次数；弹窗里的四列明细表才有名字。
+        所以配了材料目标（`material_goals`）时，真正有用的是弹窗那条路。
         """
         op = ReadMaterialCalc(self.ctx, goto_first=False, allow_dialog_fallback=True)
         result = op.execute()
@@ -291,8 +295,10 @@ class AgentChargePlanApp(ZApplication):
             log.warning('配了 %d 条材料目标，但这次没读到材料缺口，跳过材料排计划', len(goal_row_list))
             return None
 
+        # 两边都要归一化再对：页面给的是「「仓鼠笼」访问器」，配置里可能写「仓鼠笼访问器」，
+        # 直接拿原名做键会查不到，然后静默按「没读到已有数量」只排 1 次。
         owned_map: dict[str, int] = {
-            item.material_name: item.owned
+            normalize_material_name(item.material_name): item.owned
             for item in self.material_gap.named_item_list
             if item.owned is not None
         }
@@ -307,7 +313,10 @@ class AgentChargePlanApp(ZApplication):
         for goal_row in goal_row_list:
             goal = MaterialGoal.from_row(goal_row)
             owned_list.append(
-                MaterialOwned(goal=goal, owned=owned_map.get(goal.material_name))
+                MaterialOwned(
+                    goal=goal,
+                    owned=owned_map.get(normalize_material_name(goal.material_name)),
+                )
             )
 
         snapshot, warnings = planner.build_snapshot(owned_list)
