@@ -144,6 +144,8 @@ PREVIEW_BUTTON_TEXT_LIST: list[str] = ['获取', '养成', '装备', '前往']
 TABLE_HEADER_KEY_LIST: list[str] = ['所需', '已有']
 #: 结果页一里表示「已达标」的文本
 ICON_SATISFIED_TEXT: str = '已满足'
+#: 结果页一的栏目标题。区域与明细表有重叠，靠它区分「这一屏是图标排」还是「这一屏是明细表」
+ICON_TITLE_TEXT: str = '需要获取的材料'
 
 #: 点按钮后等界面反应的时间（秒）
 CLICK_WAIT: float = 1.2
@@ -715,7 +717,12 @@ def read_calc_detail(
 
     summary = NeedIconSummary()
     if icon_area is not None:
-        summary = parse_need_icons(agent_plan_page.read_text_blocks(ctx, screen, icon_area))
+        icon_blocks = agent_plan_page.read_text_blocks(ctx, screen, icon_area)
+        # 图标区矩形和明细表有重叠：停在明细表那一屏时，这个区域里读到的是表格的
+        # 「所需 / 已有」数字，直接当缺口数会读出一串脏数据。先看有没有栏目标题，
+        # 没有就当这一屏不是图标排，概况留空（明细表本身走上面那条解析，不受影响）。
+        if any(ICON_TITLE_TEXT in normalize_text(block.text) for block in icon_blocks):
+            summary = parse_need_icons(icon_blocks)
     else:
         warnings.append(f'{CALC_SCREEN}.{AREA_CALC_NEED_ICONS} 区域没配置，跳过图标概况')
     return item_list, summary, warnings

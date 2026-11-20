@@ -187,7 +187,15 @@ class AgentChargePlanApp(ZApplication):
         预览栏只有图标和数字、没有材料名，拿到也没法换算成刷本次数；弹窗里的四列明细表才有名字。
         所以配了材料目标（`material_goals`）时，真正有用的是弹窗那条路。
         """
-        op = ReadMaterialCalc(self.ctx, goto_first=False, allow_dialog_fallback=True)
+        # 配了材料目标时直奔「养成材料计算」弹窗：材料预览栏只有图标和数字、没有材料名，
+        # 读出来也换不算出次数。没配目标就省掉这几次导航，只读预览栏。
+        prefer_dialog = bool(self.config.material_goals)
+        op = ReadMaterialCalc(
+            self.ctx,
+            goto_first=False,
+            allow_dialog_fallback=True,
+            prefer_dialog=prefer_dialog,
+        )
         result = op.execute()
         if not result.is_success:
             # 读不到不算致命，照常往下走，只是少了材料这一档

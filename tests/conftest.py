@@ -312,6 +312,14 @@ def guide_screen() -> np.ndarray:
 
 
 @pytest.fixture(scope='session')
+def agent_guide_screen() -> np.ndarray:
+    """养成指南页截图（方案概览）：材料计算弹窗那条路径的入口页。"""
+    paths = sorted((SCREEN_DIR / '养成指南').glob('*.webp'))
+    assert paths, f'{SCREEN_DIR / "养成指南"} 下没有截图'
+    return load_screen(paths[0])
+
+
+@pytest.fixture(scope='session')
 def calc_result_screen() -> np.ndarray:
     """养成材料计算结果页：四列明细表。"""
     path = SCREEN_DIR / '养成材料计算' / '结果_明细四列表.webp'

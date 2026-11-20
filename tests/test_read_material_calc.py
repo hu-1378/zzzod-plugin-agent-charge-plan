@@ -14,12 +14,16 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import inspect
+from typing import TYPE_CHECKING, Any
 
+import pytest
 from agent_charge_plan.operation import read_material_calc as rmc
 from agent_charge_plan.operation.agent_plan_page import TextBlock
+from agent_charge_plan.operation.read_material_calc import ReadMaterialCalc
 
 from one_dragon.base.geometry.rectangle import Rect
+from one_dragon.base.operation.operation_round_result import OperationRoundResultEnum
 
 if TYPE_CHECKING:
     from conftest import StubContext
@@ -122,12 +126,52 @@ def test_detail_section_name(plugin_ctx: StubContext, calc_result_screen: object
 
 
 def test_need_icon_summary(plugin_ctx: StubContext, calc_need_icon_screen: object) -> None:
-    """「需要获取的材料」图标排：2 个还缺、3 个已满足，缺口数字按从左到右。"""
+    """「需要获取的材料」图标排：2 个还缺、3 个已满足，缺口数字按从左到右。
+
+    这条能成立有个前提：`区域-需要获取的材料` 的矩形要**包含标题那一行**
+    （现在 `(460, 245, 1270, 480)`，标题实测在 `y≈254`）。`read_calc_detail` 靠
+    「区域里有没有『需要获取的材料』这行字」区分「图标排」和「表格数字」，
+    矩形上边界一旦收到标题下面，这一屏就会被判成「不是图标排」、概况变空。
+    """
     _, summary, _ = rmc.read_calc_detail(plugin_ctx, calc_need_icon_screen)
 
     assert summary.gap_count == 2
     assert summary.satisfied_count == 3
     assert summary.gap_number_list == (75, 140)
+
+
+def test_need_icon_summary_parses_when_title_present(
+    plugin_ctx: StubContext, calc_need_icon_screen: object, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """把标题喂进图标区（模拟区域修好之后）：缺口数字和已满足个数都要对。"""
+    from agent_charge_plan.operation import agent_plan_page
+
+    real_read = agent_plan_page.read_text_blocks
+
+    def fake_read(ctx: object, screen: object, area: Rect) -> list[TextBlock]:
+        """图标区里补一行标题，其它区域照旧走真 OCR。"""
+        blocks = real_read(ctx, screen, area)
+        if area == rmc.calc_area(plugin_ctx, rmc.AREA_CALC_NEED_ICONS):
+            return [*blocks, _block('需要获取的材料', 460, 250, width=200)]
+        return blocks
+
+    monkeypatch.setattr(agent_plan_page, 'read_text_blocks', fake_read)
+
+    _, summary, _ = rmc.read_calc_detail(plugin_ctx, calc_need_icon_screen)
+
+    assert summary.gap_count == 2
+    assert summary.satisfied_count == 3
+    assert summary.gap_number_list == (75, 140)
+
+
+def test_need_icon_summary_skipped_without_title(
+    plugin_ctx: StubContext, calc_result_screen: object
+) -> None:
+    """停在明细表那一屏：图标区里读到的是表格数字，没有标题 → 概况留空，不当缺口。"""
+    _, summary, _ = rmc.read_calc_detail(plugin_ctx, calc_result_screen)
+
+    assert summary.gap_count == 0
+    assert summary.gap_number_list == ()
 
 
 def test_need_icon_screen_reads_only_visible_rows(
@@ -367,3 +411,418 @@ def test_gap_snapshot_summary_lines(
     assert lines[0].startswith('代理人 蕾米埃尔·丹')
     assert any('特化流明芯片' in line and '还差 75' in line for line in lines)
     assert any('需要获取的材料' in line for line in lines)
+
+
+# ============================= 养成指南页（材料计算弹窗那条路） =============================
+
+#: 养成指南页左侧竖排导航能读到的文字（选中态是黄底，不靠文字判断）
+EXPECTED_NAV_TEXT = ['方案概览', '属性&等级', '驱动盘', '音擎', '技能', '推荐队伍']
+
+
+def test_agent_guide_areas_exist(plugin_ctx: StubContext) -> None:
+    """养成指南页的区域来自插件自带 screen_info，取名取得到、坐标和 yml 一致。"""
+    title = rmc.agent_guide_area(plugin_ctx, rmc.AREA_AGENT_GUIDE_TITLE)
+    calc_button = rmc.agent_guide_area(plugin_ctx, rmc.AREA_AGENT_GUIDE_CALC_BUTTON)
+    name_area = rmc.agent_guide_area(plugin_ctx, rmc.AREA_AGENT_GUIDE_AGENT_NAME)
+
+    assert title is not None
+    assert calc_button is not None
+    assert name_area is not None
+    assert (title.x1, title.y1, title.x2, title.y2) == (160, 20, 400, 85)
+    # 「养成材料计算」入口在角色名横幅下面
+    assert calc_button.y1 >= name_area.y1
+
+
+def test_agent_guide_area_unknown(plugin_ctx: StubContext) -> None:
+    """没配置的区域返回 None，不抛异常。"""
+    assert rmc.agent_guide_area(plugin_ctx, '区域-不存在') is None
+
+
+def test_agent_guide_area_without_screen_info(bare_ctx: StubContext) -> None:
+    """主仓/插件都没这个画面的区域时，取区域和读名字都安全返回空。"""
+    assert rmc.agent_guide_area(bare_ctx, rmc.AREA_AGENT_GUIDE_TITLE) is None
+    assert rmc.read_agent_guide_name(bare_ctx, None) == ''
+
+
+def test_read_agent_guide_name(plugin_ctx: StubContext, agent_guide_screen: object) -> None:
+    """养成指南页粉色横幅上的代理人名字（项目代理人表里可能只有简称，所以按 OCR 文本读）。"""
+    assert rmc.read_agent_guide_name(plugin_ctx, agent_guide_screen) == '蕾米埃尔'
+
+
+def test_agent_guide_title_text(plugin_ctx: StubContext, agent_guide_screen: object) -> None:
+    """标题区能读到「养成指南」，这是判断「已经在养成指南页」的文本锚点。"""
+    from agent_charge_plan.operation import agent_plan_page
+
+    area = rmc.agent_guide_area(plugin_ctx, rmc.AREA_AGENT_GUIDE_TITLE)
+    assert area is not None
+    assert agent_plan_page.has_text(plugin_ctx, agent_guide_screen, area, '养成指南') is True
+
+
+def test_agent_guide_calc_button_text(
+    plugin_ctx: StubContext, agent_guide_screen: object
+) -> None:
+    """「养成材料计算」入口靠文本匹配去点，区域里必须读到这四个字。"""
+    from agent_charge_plan.operation import agent_plan_page
+
+    area = rmc.agent_guide_area(plugin_ctx, rmc.AREA_AGENT_GUIDE_CALC_BUTTON)
+    assert area is not None
+    assert agent_plan_page.has_text(
+        plugin_ctx, agent_guide_screen, area, '养成材料计算'
+    ) is True
+
+
+def test_agent_guide_back_button_is_icon_only(
+    plugin_ctx: StubContext, agent_guide_screen: object
+) -> None:
+    """左上角「返回」是纯图标按钮，读不到文字——所以不能用它当文本锚点。"""
+    from agent_charge_plan.operation import agent_plan_page
+
+    area = rmc.agent_guide_area(plugin_ctx, rmc.AREA_AGENT_GUIDE_BACK)
+    assert area is not None
+    assert agent_plan_page.read_text_blocks(plugin_ctx, agent_guide_screen, area) == []
+
+
+def test_agent_guide_left_nav_text(
+    plugin_ctx: StubContext, agent_guide_screen: object
+) -> None:
+    """左侧竖排导航的文字能读全（顺序固定：方案概览在最上）。"""
+    from agent_charge_plan.operation import agent_plan_page
+
+    area = rmc.agent_guide_area(plugin_ctx, '区域-左侧导航')
+    assert area is not None
+    blocks = agent_plan_page.read_text_blocks(plugin_ctx, agent_guide_screen, area)
+    texts = [block.text.strip() for block in blocks]
+    assert texts[: len(EXPECTED_NAV_TEXT)] == EXPECTED_NAV_TEXT
+
+
+# ============================= 表头判断：结果页到底出没出来 =============================
+
+
+def test_has_detail_table_header_on_result(
+    plugin_ctx: StubContext, calc_result_screen: object
+) -> None:
+    """结果页出来了：表头（所需 / 已有 / 仍需获取）在，判 True。"""
+    assert rmc.has_detail_table_header(plugin_ctx, calc_result_screen) is True
+
+
+def test_has_detail_table_header_on_setting(
+    plugin_ctx: StubContext, calc_setting_screen: object
+) -> None:
+    """还停在设置页：没有表头，判 False —— 说明「确定」没生效、结果页没出来。"""
+    assert rmc.has_detail_table_header(plugin_ctx, calc_setting_screen) is False
+
+
+def test_has_detail_table_header_without_area(bare_ctx: StubContext) -> None:
+    """区域没配置时判 False，不抛异常。"""
+    assert rmc.has_detail_table_header(bare_ctx, None) is False
+
+
+# ============================= 弹窗兜底开关的默认值 =============================
+
+
+def test_dialog_fallback_defaults_to_true() -> None:
+    """`ReadMaterialCalc` 默认允许走「养成指南 → 养成材料计算」这条兜底路。
+
+    这是构造签名层面的约定：默认值被改回去，材料缺口就又只剩「只读不排」那一条路了。
+    """
+    import inspect
+
+    from agent_charge_plan.operation.read_material_calc import ReadMaterialCalc
+
+    params = inspect.signature(ReadMaterialCalc.__init__).parameters
+    assert params['goto_first'].default is True
+    assert params['allow_dialog_fallback'].default is True
+
+
+def test_guide_status_constants() -> None:
+    """养成指南页相关常量：节点出边是按这些 status 精确匹配的，改字就会断链。"""
+    assert rmc.AGENT_GUIDE_SCREEN == '养成指南'
+    assert rmc.STATUS_GUIDE_READY == '已在养成指南页'
+    assert rmc.STATUS_DIALOG_OPEN == '弹窗已开'
+    assert rmc.STATUS_PREVIEW_EMPTY == '材料预览没读到'
+
+
+def test_read_material_calc_node_chain() -> None:
+    """节点链的关键一环：`进养成指南` / `确认养成指南` / `确认弹窗已开` 都在。
+
+    这两条出边是精确匹配 status 的（没有兜底边），节点改名或被删会让材料缺口
+    永远读不出来，所以在签名层面钉一下。
+    """
+    from agent_charge_plan.operation.read_material_calc import ReadMaterialCalc
+
+    for node_method in ('goto_agent_guide', 'confirm_agent_guide', 'confirm_dialog',
+                        'read_detail_table', 'close_dialog', 'handle_init'):
+        assert hasattr(ReadMaterialCalc, node_method), node_method
+    # 旧的直连方法名已经改掉了，避免有人调旧名字
+    assert not hasattr(ReadMaterialCalc, 'goto_guide_page')
+
+
+# ============================= 弹窗路径的开关与收尾（节点级，不起 ZContext） =============================
+
+
+def _bare_operation() -> Any:
+    """造一个没跑 `__init__` 的操作对象，只塞被测方法要用到的属性。
+
+    真 `ReadMaterialCalc(ctx)` 会连带建 `OpenAndEnterGame` 那一整套（要配置、要游戏窗口），
+    跑一个纯判断方法不值当。这里 `object.__new__` 跳过构造，缺失的东西由用例自己补。
+    """
+    op: Any = object.__new__(ReadMaterialCalc)
+    op.agent_name = ''
+    op.snapshot = rmc.MaterialGapSnapshot()
+    op.fail_status = ''
+    op.prefer_dialog = False
+    op.goto_first = False
+    op.allow_dialog_fallback = True
+    op.ctx = object()
+    op.last_screenshot = None
+    op.node_retry_times = 0
+    op.node_max_retry_times = 2
+    return op
+
+
+def test_read_material_calc_signature_defaults() -> None:
+    """构造参数的默认值：默认允许走弹窗兜底，但**不**跳过材料预览。"""
+    params = inspect.signature(ReadMaterialCalc.__init__).parameters
+    assert params['goto_first'].default is True
+    assert params['allow_dialog_fallback'].default is True
+    assert params['prefer_dialog'].default is False
+
+
+def test_prefer_dialog_skips_preview() -> None:
+    """`prefer_dialog=True` 时不读材料预览，直接复用「材料预览没读到」状态走弹窗路径。"""
+    op = _bare_operation()
+    op.prefer_dialog = True
+
+    result = op.read_preview()
+
+    assert result.is_success
+    assert result.status == rmc.STATUS_PREVIEW_EMPTY
+
+
+def test_handle_init_resets_state() -> None:
+    """同一个实例复用前要清干净：名字、结果、失败原因都不能留给下一次。"""
+    op = _bare_operation()
+    op.agent_name = '蕾米埃尔'
+    op.snapshot = rmc.MaterialGapSnapshot(item_list=[rmc.MaterialGapItem(required=75, owned=0)])
+    op.fail_status = '上一次的失败原因'
+
+    op.handle_init()
+
+    assert op.agent_name == ''
+    assert op.snapshot is not None
+    assert op.snapshot.item_list == []
+    assert op.fail_status == ''
+
+
+def test_close_dialog_success() -> None:
+    """读到数据：点关闭后带数据成功，status 里写明读了几行。"""
+    op = _bare_operation()
+    op.snapshot = rmc.MaterialGapSnapshot(
+        item_list=[rmc.MaterialGapItem(material_name='特化流明芯片', required=75, owned=0)]
+    )
+    closed: list[bool] = []
+    op._is_dialog_open = lambda: True
+    op._close_calc_dialog = lambda: closed.append(True)
+
+    result = op.close_dialog()
+
+    assert result.is_success
+    assert closed == [True]
+    assert '明细表读到 1 行' in result.status
+    assert result.data is op.snapshot
+
+
+def test_close_dialog_uses_fail_status() -> None:
+    """弹窗路径中途失败：收尾节点带着原因失败，不是成功。"""
+    op = _bare_operation()
+    op.fail_status = '点了「确定」但结果页没出来：明细表表头「所需 / 已有」没找到'
+    op._is_dialog_open = lambda: False
+    op._close_calc_dialog = lambda: None
+
+    result = op.close_dialog()
+
+    assert result.is_fail
+    assert result.status == op.fail_status
+
+
+def test_close_dialog_empty_without_reason() -> None:
+    """没数据也没记原因（例如两天都没读到）：给一条兜底说明再失败。"""
+    op = _bare_operation()
+    op._is_dialog_open = lambda: False
+    op._close_calc_dialog = lambda: None
+
+    result = op.close_dialog()
+
+    assert result.is_fail
+    assert result.status == '明细表一行都没读到'
+
+
+def test_close_dialog_skips_click_when_not_open() -> None:
+    """弹窗本来就没开：不要瞎点关闭。"""
+    op = _bare_operation()
+    op.snapshot = rmc.MaterialGapSnapshot(item_list=[rmc.MaterialGapItem(required=1, owned=0)])
+    closed: list[bool] = []
+    op._is_dialog_open = lambda: False
+    op._close_calc_dialog = lambda: closed.append(True)
+
+    op.close_dialog()
+
+    assert closed == []
+
+
+# ============================= 明细表读空 → 等一秒再读一次 =============================
+
+
+def test_read_detail_table_retries_once_when_empty(monkeypatch: pytest.MonkeyPatch) -> None:
+    """第一次读空：返回重试（不是失败），让框架等一秒再读一次。"""
+    op = _bare_operation()
+    op.node_retry_times = 0
+    monkeypatch.setattr(
+        rmc, 'read_calc_detail',
+        lambda ctx, screen: ([], rmc.NeedIconSummary(), ['明细表的四列表一行都没读到']),
+    )
+
+    result = op.read_detail_table()
+
+    assert result.result == OperationRoundResultEnum.RETRY
+    assert '再读一次' in result.status
+    assert op.fail_status == ''
+
+
+def test_read_detail_table_empty_after_retry(monkeypatch: pytest.MonkeyPatch) -> None:
+    """第二次还是空：记下原因、返回「没读到数据」状态，交给收尾节点去关弹窗。"""
+    op = _bare_operation()
+    op.node_retry_times = 1
+    monkeypatch.setattr(
+        rmc, 'read_calc_detail',
+        lambda ctx, screen: ([], rmc.NeedIconSummary(), ['明细表的四列表一行都没读到']),
+    )
+    monkeypatch.setattr(rmc, 'has_detail_table_header', lambda ctx, screen: False)
+
+    result = op.read_detail_table()
+
+    assert result.is_success
+    assert result.status == rmc.STATUS_DETAIL_EMPTY
+    assert '结果页没出来' in op.fail_status
+    assert op.snapshot.item_list == []
+
+
+def test_read_detail_table_empty_but_header_found(
+    monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """有表头没数据行：原因写成「结果页出来了但没数据」，方便区分是加载慢还是要往下滚。"""
+    op = _bare_operation()
+    op.node_retry_times = 1
+    monkeypatch.setattr(
+        rmc, 'read_calc_detail', lambda ctx, screen: ([], rmc.NeedIconSummary(), [])
+    )
+    monkeypatch.setattr(rmc, 'has_detail_table_header', lambda ctx, screen: True)
+
+    result = op.read_detail_table()
+
+    assert result.status == rmc.STATUS_DETAIL_EMPTY
+    assert '有表头但没有数据行' in op.fail_status
+
+
+def test_read_detail_table_returns_data(monkeypatch: pytest.MonkeyPatch) -> None:
+    """读到数据：状态是「明细表读到数据」，结果里带上代理人名字和数据来源。"""
+    op = _bare_operation()
+    op.agent_name = '蕾米埃尔'
+    item = rmc.MaterialGapItem(material_name='特化流明芯片', required=75, owned=0, missing=75)
+    monkeypatch.setattr(
+        rmc, 'read_calc_detail',
+        lambda ctx, screen: ([item], rmc.NeedIconSummary(gap_count=1, gap_number_list=(75,)), []),
+    )
+
+    result = op.read_detail_table()
+
+    assert result.is_success
+    assert result.status == rmc.STATUS_DETAIL_READ
+    assert op.snapshot.source == rmc.SOURCE_CALC_DETAIL
+    assert op.snapshot.agent_name == '蕾米埃尔'
+    assert op.snapshot.item_list[0].material_name == '特化流明芯片'
+
+
+# ============================= 节点图：不许有悬空边 / 多个起点 =============================
+
+
+def _node_map() -> dict[str, Any]:
+    """把类上带 `@operation_node` 的方法收成 {节点名: OperationNode}。"""
+    nodes: dict[str, Any] = {}
+    for method_name in dir(ReadMaterialCalc):
+        node = getattr(getattr(ReadMaterialCalc, method_name, None),
+                       'operation_node_annotation', None)
+        if node is not None:
+            nodes[node.cn] = node
+    return nodes
+
+
+def _edge_list() -> list[tuple[str, str, bool, str | None]]:
+    """把所有 `@node_from` 收成 (起点, 终点, success, status) 四元组。
+
+    `node_to_name` 由图构建时自动填充，这里用被装饰方法自己的节点名当终点。
+    `ignore_status` 不参与比较：`OperationEdgeDesc` 保留的是装饰器入参默认值，
+    真正的「忽略状态」是建图时按 `status is None` 算的，拿它断言会误判。
+    """
+    edges: list[tuple[str, str, bool, str | None]] = []
+    for method_name in dir(ReadMaterialCalc):
+        method = getattr(ReadMaterialCalc, method_name, None)
+        node = getattr(method, 'operation_node_annotation', None)
+        for desc in getattr(method, 'operation_edge_annotation', None) or []:
+            if node is None:
+                continue
+            edges.append((desc.node_from_name, node.cn, desc.success, desc.status))
+    return edges
+
+
+def test_node_graph_has_single_start_and_no_dangling_edge() -> None:
+    """节点图的结构约束：一个起点、没有悬空边、除收尾节点外每个节点都能往下走。"""
+    nodes = _node_map()
+    edges = _edge_list()
+
+    assert nodes, '一个节点都没找到，装饰器元数据可能变了'
+    start_node_list = [name for name, node in nodes.items() if node.is_start_node]
+    assert start_node_list == ['确认特训目标页']
+
+    for from_name, to_name, _, _ in edges:
+        assert from_name in nodes, f'边的起点 {from_name} 不是已声明的节点'
+        assert to_name in nodes, f'边的终点 {to_name} 不是已声明的节点'
+
+    # 收尾节点只进不出，其它节点都要有出边
+    from_name_set = {edge[0] for edge in edges}
+    terminal_node_list = [name for name in nodes if name not in from_name_set]
+    assert terminal_node_list == ['关掉弹窗']
+
+
+def test_node_graph_has_close_dialog_edges() -> None:
+    """收尾的三条入边：读到数据（任意状态）、两个中途失败（success=False）。"""
+    edges = _edge_list()
+
+    assert ('读明细表', '关掉弹窗', True, None) in edges
+    assert ('确认弹窗已开', '关掉弹窗', False, None) in edges
+    assert ('点确定出结果', '关掉弹窗', False, None) in edges
+
+
+def test_node_graph_preview_to_guide_is_status_matched() -> None:
+    """`读材料预览 → 进养成指南` 是按状态精确匹配的（status 不是 None）。"""
+    edges = _edge_list()
+
+    assert ('读材料预览', '进养成指南', True, rmc.STATUS_PREVIEW_EMPTY) in edges
+
+
+def test_read_detail_table_node_retries_twice() -> None:
+    """「读空等一秒再读」是靠节点重试实现的：重试次数必须是 2。
+
+    被改成 1 的话就只剩一次机会，结果页加载慢一点就永远读不到。
+    """
+    nodes = _node_map()
+    assert nodes['读明细表'].node_max_retry_times == 2
+
+
+def test_dialog_result_status_constants() -> None:
+    """明细表读数的两个状态、关闭按钮区域名、两个等待时间，都被出边/收尾依赖。"""
+    assert rmc.STATUS_DETAIL_READ == '明细表读到数据'
+    assert rmc.STATUS_DETAIL_EMPTY == '明细表没读到数据'
+    assert rmc.AREA_CALC_CLOSE == '按钮-关闭'
+    assert rmc.RESULT_RETRY_WAIT == 1.0
+    assert rmc.CLOSE_WAIT == 1.0
