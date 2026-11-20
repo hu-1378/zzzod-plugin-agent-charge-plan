@@ -1,0 +1,638 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>体力计划配置（本地）</title>
+<style>
+  :root {
+    --bg: #f5f6f8;
+    --card: #ffffff;
+    --line: #dfe3e8;
+    --text: #1f2329;
+    --muted: #6b7280;
+    --accent: #2f6fed;
+    --ok-bg: #e8f7ee;
+    --ok-line: #2e9e5b;
+    --err-bg: #fdecec;
+    --err-line: #d64545;
+    --warn-bg: #fff7e6;
+    --warn-line: #c98a1b;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.6 "Microsoft YaHei", "Segoe UI", system-ui, sans-serif;
+  }
+  header { position: sticky; top: 0; z-index: 10; background: var(--bg); padding: 14px 20px 8px; border-bottom: 1px solid var(--line); }
+  h1 { margin: 0 0 10px; font-size: 18px; font-weight: 600; }
+  h2 { margin: 0 0 8px; font-size: 14px; font-weight: 600; color: var(--muted); }
+  main { padding: 14px 20px 90px; max-width: 1080px; }
+  .row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+  label.field { display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: var(--muted); }
+  select, input[type="text"], input[type="number"] {
+    font: inherit; color: var(--text);
+    padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; background: #fff;
+    min-width: 120px;
+  }
+  input[type="number"] { min-width: 84px; }
+  select:disabled, input:disabled { background: #f1f3f5; color: var(--muted); }
+  button {
+    font: inherit; cursor: pointer; padding: 5px 12px;
+    border: 1px solid var(--line); border-radius: 6px; background: #fff; color: var(--text);
+  }
+  button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+  button:disabled { opacity: .45; cursor: default; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.primary:hover:not(:disabled) { color: #fff; opacity: .9; }
+  button.danger:hover:not(:disabled) { border-color: var(--err-line); color: var(--err-line); }
+  .path-row { margin-top: 8px; display: flex; gap: 8px; align-items: baseline; font-size: 12px; color: var(--muted); }
+  .path-row code {
+    font-family: Consolas, "Courier New", monospace; font-size: 12px; color: #333;
+    background: #eef1f5; padding: 2px 6px; border-radius: 4px; cursor: pointer;
+    word-break: break-all;
+  }
+  .path-row code:hover { background: #e2e8f0; }
+  .banner { margin-top: 10px; padding: 8px 12px; border-radius: 6px; border-left: 4px solid var(--line); white-space: pre-line; display: none; }
+  .banner.ok { display: block; background: var(--ok-bg); border-color: var(--ok-line); color: #1c6b3d; }
+  .banner.err { display: block; background: var(--err-bg); border-color: var(--err-line); color: #8d2323; }
+  .banner.warn { display: block; background: var(--warn-bg); border-color: var(--warn-line); color: #7a5310; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; margin-bottom: 10px; }
+  .plan { border-left: 4px solid transparent; }
+  .plan.error { border-left-color: var(--err-line); background: #fffafa; }
+  .plan-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+  .plan-idx { font-weight: 600; color: var(--muted); min-width: 42px; }
+  .plan-msg { color: var(--err-line); font-size: 12px; }
+  .plan-actions { margin-left: auto; display: flex; gap: 6px; }
+  .grid { display: flex; flex-wrap: wrap; gap: 10px 14px; }
+  .hint { color: var(--muted); font-size: 12px; }
+  .actions { position: fixed; left: 0; right: 0; bottom: 0; display: flex; gap: 10px; align-items: center;
+    padding: 10px 20px; background: #fff; border-top: 1px solid var(--line); }
+  .actions .grow { flex: 1; }
+  .empty { color: var(--muted); padding: 12px 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>体力计划配置（本地页面，不启动一条龙）</h1>
+  <div class="row">
+    <label class="field">实例号<select id="selInstance"></select></label>
+    <label class="field">组<select id="selGroup"></select></label>
+    <label class="field">配置文件<select id="selApp"></select></label>
+    <button id="btnReload" type="button">重新加载</button>
+  </div>
+  <div class="path-row">
+    <span>配置文件绝对路径</span>
+    <code id="pathText" title="点击复制">（未加载）</code>
+  </div>
+  <div id="banner" class="banner"></div>
+</header>
+
+<main>
+  <section class="card">
+    <h2>全局选项</h2>
+    <div class="row">
+      <label class="field">恢复电量<select id="selRestore"></select></label>
+      <span class="hint">保存时只提交页面上的字段，文件里其它键（含 history_list）原样保留。</span>
+    </div>
+  </section>
+
+  <section id="planList"></section>
+
+  <div class="actions">
+    <button id="btnAdd" type="button">＋ 新增一条计划</button>
+    <button id="btnSave" type="button" class="primary">保存到配置文件</button>
+    <button id="btnCopy" type="button">复制配置摘要</button>
+    <span id="dirtyFlag" class="hint grow"></span>
+  </div>
+</main>
+
+<script>
+(function () {
+  'use strict';
+
+  var VIDEO_CATEGORY = '实战模拟室';
+
+  var state = {
+    meta: null,
+    instance: '',
+    group: '',
+    app: '',
+    path: '',
+    relPath: '',
+    data: null,
+    dirty: false,
+    errors: new Map()
+  };
+
+  // ── DOM 小工具 ─────────────────────────────────────────────────────
+  function $(id) { return document.getElementById(id); }
+
+  function el(tag, props, children) {
+    var node = document.createElement(tag);
+    if (props) {
+      Object.keys(props).forEach(function (key) {
+        if (key === 'class') { node.className = props[key]; }
+        else if (key === 'text') { node.textContent = props[key]; }
+        else if (key === 'onclick') { node.addEventListener('click', props[key]); }
+        else if (key === 'onchange') { node.addEventListener('change', props[key]); }
+        else if (key === 'oninput') { node.addEventListener('input', props[key]); }
+        else if (props[key] !== null && props[key] !== undefined) { node.setAttribute(key, props[key]); }
+      });
+    }
+    (children || []).forEach(function (child) {
+      if (child) { node.appendChild(child); }
+    });
+    return node;
+  }
+
+  function fillSelect(select, options, currentValue) {
+    select.textContent = '';
+    options.forEach(function (opt) {
+      var option = el('option', { value: opt.value, text: opt.label });
+      if (String(opt.value) === String(currentValue)) { option.selected = true; }
+      select.appendChild(option);
+    });
+    if (options.length === 0) {
+      select.appendChild(el('option', { value: '', text: '（无可选项）' }));
+    }
+  }
+
+  // ── 接口 ───────────────────────────────────────────────────────────
+  function requestJson(url, options) {
+    return fetch(url, options).then(function (response) {
+      return response.json().then(
+        function (payload) { return { ok: response.ok, status: response.status, payload: payload }; },
+        function () {
+          return { ok: false, status: response.status, payload: { ok: false, error: '接口返回的不是 JSON（HTTP ' + response.status + '）' } };
+        }
+      );
+    }, function (error) {
+      return { ok: false, status: 0, payload: { ok: false, error: '请求失败：' + error.message + '（服务是不是已经关了？）' } };
+    });
+  }
+
+  // ── 提示条 ─────────────────────────────────────────────────────────
+  function showBanner(kind, text) {
+    var banner = $('banner');
+    banner.className = 'banner' + (kind ? ' ' + kind : '');
+    banner.textContent = text || '';
+  }
+
+  function showErrors(payload) {
+    var errors = payload.errors || [];
+    if (errors.length === 0) { return payload.error || '保存失败'; }
+    var lines = [payload.error || '保存失败'];
+    errors.forEach(function (item) {
+      var where = (item.index === null || item.index === undefined) ? '' : '第 ' + (item.index + 1) + ' 条 ';
+      var field = item.field ? '· ' + item.field + '：' : '';
+      lines.push(where + field + item.message);
+    });
+    return lines.join('\n');
+  }
+
+  // ── meta / 下拉框 ──────────────────────────────────────────────────
+  function cp() { return (state.meta && state.meta.charge_plan) || {}; }
+
+  function categoryOptions() { return cp().category_list || []; }
+
+  function missionTypeOptions(categoryName) {
+    var map = cp().mission_type_map || {};
+    return map[categoryName] || [];
+  }
+
+  function missionOptions(categoryName, missionTypeName) {
+    var map = cp().mission_map || {};
+    var sub = map[categoryName] || {};
+    return sub[missionTypeName] || [];
+  }
+
+  function loadMeta() {
+    return requestJson('/api/meta').then(function (result) {
+      if (!result.ok || !result.payload.ok) {
+        showBanner('err', '读取 meta 失败：' + (result.payload.error || result.status));
+        throw new Error(result.payload.error || 'meta 读取失败');
+      }
+      state.meta = result.payload;
+      var fallback = result.payload.default || {};
+      state.instance = fallback.instance || (result.payload.instances || [])[0] || '';
+      state.group = fallback.group || '';
+      state.app = fallback.app || '';
+      renderSelectors();
+      return loadConfig();
+    });
+  }
+
+  function renderSelectors() {
+    var meta = state.meta;
+    fillSelect($('selInstance'), (meta.instances || []).map(function (name) {
+      return { label: name, value: name };
+    }), state.instance);
+
+    var groups = (meta.groups || {})[state.instance] || [];
+    if (groups.indexOf(state.group) === -1) { state.group = groups[0] || ''; }
+    fillSelect($('selGroup'), groups.map(function (name) { return { label: name, value: name }; }), state.group);
+
+    var appMap = (meta.apps || {})[state.instance] || {};
+    var apps = appMap[state.group] || [];
+    var appIds = apps.map(function (name) { return name.replace(/\.yml$/, ''); });
+    if (appIds.indexOf(state.app) === -1) {
+      state.app = appIds.indexOf('charge_plan') >= 0 ? 'charge_plan' : (appIds[0] || '');
+    }
+    fillSelect($('selApp'), apps.map(function (name) {
+      return { label: name, value: name.replace(/\.yml$/, '') };
+    }), state.app);
+  }
+
+  // ── 加载配置 ───────────────────────────────────────────────────────
+  function loadConfig() {
+    if (!state.instance || !state.group || !state.app) {
+      showBanner('warn', '没有可加载的配置文件，请检查 config/ 目录。');
+      return Promise.resolve();
+    }
+    var url = '/api/config?instance=' + encodeURIComponent(state.instance) +
+      '&group=' + encodeURIComponent(state.group) +
+      '&app=' + encodeURIComponent(state.app);
+    return requestJson(url).then(function (result) {
+      if (!result.ok || !result.payload.ok) {
+        showBanner('err', '读取配置失败：' + (result.payload.error || result.status));
+        return;
+      }
+      var payload = result.payload;
+      state.data = payload.data || {};
+      if (!Array.isArray(state.data.plan_list)) { state.data.plan_list = []; }
+      state.path = payload.path || '';
+      state.relPath = payload.rel_path || '';
+      state.errors = new Map();
+      state.dirty = false;
+      $('pathText').textContent = state.path || '（未知）';
+      render();
+      showBanner('', '');
+    });
+  }
+
+  // ── 渲染计划列表 ───────────────────────────────────────────────────
+  function setDirty(flag) {
+    state.dirty = flag;
+    $('dirtyFlag').textContent = flag ? '有未保存的修改' : '';
+  }
+
+  function planList() { return (state.data && state.data.plan_list) || []; }
+
+  function buildSelect(options, currentValue, onChange, extraLabel) {
+    var opts = options.slice();
+    if (extraLabel && !opts.some(function (o) { return String(o.value) === String(currentValue); })) {
+      opts.unshift({ label: extraLabel, value: currentValue });
+    }
+    var select = el('select', { onchange: function (event) { onChange(event.target.value); } });
+    fillSelect(select, opts, currentValue);
+    if (opts.length === 0) { select.disabled = true; }
+    return select;
+  }
+
+  function buildCard(plan, index) {
+    var card = el('div', { class: 'card plan' + (state.errors.has(index) ? ' error' : '') });
+    var head = el('div', { class: 'plan-head' }, [
+      el('span', { class: 'plan-idx', text: '第 ' + (index + 1) + ' 条' }),
+      el('span', { class: 'plan-msg', text: state.errors.get(index) || '' })
+    ]);
+    var actions = el('div', { class: 'plan-actions' }, [
+      el('button', {
+        type: 'button', text: '上移',
+        disabled: index === 0 ? 'disabled' : null,
+        onclick: function () { movePlan(index, -1); }
+      }),
+      el('button', {
+        type: 'button', text: '下移',
+        disabled: index === planList().length - 1 ? 'disabled' : null,
+        onclick: function () { movePlan(index, 1); }
+      }),
+      el('button', {
+        type: 'button', class: 'danger', text: '删除',
+        onclick: function () { deletePlan(index); }
+      })
+    ]);
+    head.appendChild(actions);
+    card.appendChild(head);
+
+    var grid = el('div', { class: 'grid' });
+
+    var categorySelect = buildSelect(categoryOptions(), plan.category_name, function (value) {
+      onCategoryChange(plan, value);
+    });
+    grid.appendChild(el('label', { class: 'field' }, [el('span', { text: '分类' }), categorySelect]));
+
+    var missionTypes = missionTypeOptions(plan.category_name);
+    var missionTypeSelect = buildSelect(missionTypes, plan.mission_type_name || '', function (value) {
+      onMissionTypeChange(plan, value);
+    }, missionTypes.length === 0 ? '（该分类没有副本类型）' : '');
+    grid.appendChild(el('label', { class: 'field' }, [el('span', { text: '副本类型' }), missionTypeSelect]));
+
+    // 副本名：只在该副本类型真的有可选副本时出现（实战模拟室就是这种情况）
+    var missions = missionOptions(plan.category_name, plan.mission_type_name || '');
+    if (missions.length > 0 || plan.mission_name) {
+      // 没得选时要让用户看到「现在存的是什么」，而不是只有一个空占位
+      var missionPlaceholder = missions.length === 0
+        ? (plan.mission_name + '（无可选副本，保留原值）')
+        : (plan.mission_name + '（不在可选列表）');
+      var missionSelect = buildSelect(missions, plan.mission_name || '', function (value) {
+        plan.mission_name = value === '' ? null : value;
+        setDirty(true);
+      }, missionPlaceholder);
+      grid.appendChild(el('label', { class: 'field' }, [el('span', { text: '副本名' }), missionSelect]));
+    }
+
+    if (plan.category_name === VIDEO_CATEGORY) {
+      var cardNumSelect = buildSelect(cp().card_num_list || [], plan.card_num || '默认数量', function (value) {
+        plan.card_num = value;
+        setDirty(true);
+      });
+      grid.appendChild(el('label', { class: 'field' }, [el('span', { text: '卡片数量' }), cardNumSelect]));
+    }
+
+    grid.appendChild(el('label', { class: 'field' }, [
+      el('span', { text: '计划次数' }),
+      el('input', {
+        type: 'number', min: '0', step: '1', value: String(plan.plan_times ?? 0),
+        onchange: function (event) { plan.plan_times = toInt(event.target.value, 0); setDirty(true); }
+      })
+    ]));
+    grid.appendChild(el('label', { class: 'field' }, [
+      el('span', { text: '已运行次数' }),
+      el('input', {
+        type: 'number', min: '0', step: '1', value: String(plan.run_times ?? 0),
+        onchange: function (event) { plan.run_times = toInt(event.target.value, 0); setDirty(true); }
+      })
+    ]));
+    grid.appendChild(el('label', { class: 'field' }, [
+      el('span', { text: '自动战斗配置' }),
+      el('input', {
+        type: 'text', value: plan.auto_battle_config || '',
+        onchange: function (event) { plan.auto_battle_config = event.target.value; setDirty(true); }
+      })
+    ]));
+    grid.appendChild(el('label', { class: 'field' }, [
+      el('span', { text: '预备编队（-1 表示当前配队）' }),
+      el('input', {
+        type: 'number', min: '-1', step: '1', value: String(plan.predefined_team_idx ?? -1),
+        onchange: function (event) { plan.predefined_team_idx = toInt(event.target.value, -1); setDirty(true); }
+      })
+    ]));
+
+    card.appendChild(grid);
+    return card;
+  }
+
+  function toInt(text, fallback) {
+    var value = parseInt(text, 10);
+    return isNaN(value) ? fallback : value;
+  }
+
+  function onCategoryChange(plan, categoryName) {
+    plan.category_name = categoryName;
+    var missionTypes = missionTypeOptions(categoryName);
+    if (missionTypes.length === 0) {
+      plan.mission_type_name = '';
+      plan.mission_name = null;
+    } else if (!missionTypes.some(function (item) { return item.value === plan.mission_type_name; })) {
+      plan.mission_type_name = missionTypes[0].value;
+      var missions = missionOptions(categoryName, plan.mission_type_name);
+      plan.mission_name = missions.length > 0 ? missions[0].value : null;
+    }
+    setDirty(true);
+    render();
+  }
+
+  function onMissionTypeChange(plan, missionTypeName) {
+    plan.mission_type_name = missionTypeName;
+    var missions = missionOptions(plan.category_name, missionTypeName);
+    if (missions.length === 0) {
+      plan.mission_name = null;
+    } else if (!missions.some(function (item) { return item.value === plan.mission_name; })) {
+      plan.mission_name = missions[0].value;
+    }
+    setDirty(true);
+    render();
+  }
+
+  function movePlan(index, delta) {
+    var list = planList();
+    var target = index + delta;
+    if (target < 0 || target >= list.length) { return; }
+    var tmp = list[index];
+    list[index] = list[target];
+    list[target] = tmp;
+    setDirty(true);
+    render();
+  }
+
+  function deletePlan(index) {
+    var list = planList();
+    if (index < 0 || index >= list.length) { return; }
+    if (!window.confirm('确定删除第 ' + (index + 1) + ' 条计划？')) { return; }
+    list.splice(index, 1);
+    setDirty(true);
+    render();
+  }
+
+  function newPlan() {
+    var categories = categoryOptions();
+    var categoryName = categories.length > 0 ? categories[0].value : '实战模拟室';
+    var missionTypes = missionTypeOptions(categoryName);
+    var missionTypeName = missionTypes.length > 0 ? missionTypes[0].value : '';
+    var missions = missionOptions(categoryName, missionTypeName);
+    var last = planList()[planList().length - 1];
+    return {
+      tab_name: (last && last.tab_name) || '训练',
+      category_name: categoryName,
+      mission_type_name: missionTypeName,
+      mission_name: missions.length > 0 ? missions[0].value : null,
+      level: (last && last.level) || '默认等级',
+      auto_battle_config: (last && last.auto_battle_config) || '全配队通用',
+      run_times: 0,
+      plan_times: 1,
+      card_num: '默认数量',
+      predefined_team_idx: (last && last.predefined_team_idx !== undefined) ? last.predefined_team_idx : -1,
+      notorious_hunt_buff_num: 1,
+      plan_id: newUuid()
+    };
+  }
+
+  function newUuid() {
+    if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+      return window.crypto.randomUUID();
+    }
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (ch) {
+      var rand = Math.floor(Math.random() * 16);
+      var value = ch === 'x' ? rand : ((rand & 0x3) | 0x8);
+      return value.toString(16);
+    });
+  }
+
+  function render() {
+    var restoreList = cp().restore_charge_list || [];
+    var restoreSelect = $('selRestore');
+    fillSelect(restoreSelect, restoreList, state.data ? state.data.restore_charge : '');
+    restoreSelect.disabled = restoreList.length === 0;
+
+    var container = $('planList');
+    container.textContent = '';
+    var list = planList();
+    if (list.length === 0) {
+      container.appendChild(el('div', { class: 'card empty', text: '这个配置文件里没有计划，点下面的「新增一条计划」开始。' }));
+    }
+    list.forEach(function (plan, index) {
+      container.appendChild(buildCard(plan, index));
+    });
+    $('dirtyFlag').textContent = state.dirty ? '有未保存的修改' : '';
+  }
+
+  // ── 保存 ───────────────────────────────────────────────────────────
+  function save() {
+    if (!state.data || !state.instance) { return; }
+    var data = { plan_list: planList() };
+    if (Object.prototype.hasOwnProperty.call(state.data, 'restore_charge')) {
+      data.restore_charge = state.data.restore_charge;
+    }
+    var body = { instance: state.instance, group: state.group, app: state.app, data: data };
+    state.errors = new Map();
+    $('btnSave').disabled = true;
+    showBanner('warn', '正在保存…');
+
+    requestJson('/api/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    }).then(function (result) {
+      $('btnSave').disabled = false;
+      var payload = result.payload || {};
+      if (!result.ok || !payload.ok) {
+        (payload.errors || []).forEach(function (item) {
+          if (item.index !== null && item.index !== undefined) { state.errors.set(item.index, item.message); }
+        });
+        showBanner('err', '保存失败：' + showErrors(payload));
+        render();
+        return;
+      }
+      state.path = payload.path || state.path;
+      state.relPath = payload.rel_path || state.relPath;
+      $('pathText').textContent = state.path;
+      setDirty(false);
+      var text = payload.message || '保存成功';
+      if (payload.warnings && payload.warnings.length > 0) {
+        text += '\n提示：' + payload.warnings.join('；');
+      }
+      showBanner('ok', text);
+      render();
+    });
+  }
+
+  // ── 复制 ───────────────────────────────────────────────────────────
+  function copyText(text) {
+    if (navigator.clipboard && window.isSecureContext) {
+      return navigator.clipboard.writeText(text);
+    }
+    return new Promise(function (resolve, reject) {
+      var area = el('textarea', { style: 'position:fixed;top:-1000px;left:-1000px;' });
+      area.value = text;
+      document.body.appendChild(area);
+      area.select();
+      try {
+        document.execCommand('copy') ? resolve() : reject(new Error('复制被浏览器拒绝'));
+      } catch (error) {
+        reject(error);
+      } finally {
+        document.body.removeChild(area);
+      }
+    });
+  }
+
+  function summaryText() {
+    var list = planList();
+    var lines = ['体力计划（' + (state.relPath || '未加载') + '，共 ' + list.length + ' 条）'];
+    list.forEach(function (plan) {
+      var parts = [plan.category_name];
+      if (plan.mission_type_name) { parts.push(plan.mission_type_name); }
+      if (plan.mission_name) { parts.push(plan.mission_name); }
+      var line = parts.join('/') + ' × ' + (plan.plan_times ?? 0);
+      if (plan.category_name === VIDEO_CATEGORY && plan.card_num && plan.card_num !== '默认数量') {
+        line += '（每卡 ' + plan.card_num + ' 次）';
+      }
+      if (plan.run_times) { line += '（已跑 ' + plan.run_times + '）'; }
+      lines.push(line);
+    });
+    return lines.join('\n');
+  }
+
+  // ── 事件绑定 ───────────────────────────────────────────────────────
+  function bindEvents() {
+    $('selInstance').addEventListener('change', function (event) {
+      state.instance = event.target.value;
+      state.group = '';
+      state.app = '';
+      renderSelectors();
+      loadConfig();
+    });
+    $('selGroup').addEventListener('change', function (event) {
+      state.group = event.target.value;
+      state.app = '';
+      renderSelectors();
+      loadConfig();
+    });
+    $('selApp').addEventListener('change', function (event) {
+      state.app = event.target.value;
+      loadConfig();
+    });
+    $('btnReload').addEventListener('click', function () {
+      if (state.dirty && !window.confirm('有未保存的修改，确定重新加载？')) { return; }
+      loadConfig();
+    });
+    $('selRestore').addEventListener('change', function (event) {
+      if (!state.data) { return; }
+      state.data.restore_charge = event.target.value;
+      setDirty(true);
+    });
+    $('btnAdd').addEventListener('click', function () {
+      if (!state.data) { return; }
+      state.data.plan_list = planList().concat([newPlan()]);
+      setDirty(true);
+      render();
+    });
+    $('btnSave').addEventListener('click', save);
+    $('btnCopy').addEventListener('click', function () {
+      copyText(summaryText()).then(function () {
+        showBanner('ok', '已把配置摘要复制到剪贴板：\n' + summaryText());
+      }, function (error) {
+        showBanner('err', '复制失败：' + error.message + '\n可以手动选中下面的摘要：\n' + summaryText());
+      });
+    });
+    $('pathText').addEventListener('click', function () {
+      if (!state.path) { return; }
+      copyText(state.path).then(function () {
+        showBanner('ok', '已复制配置文件路径：' + state.path);
+      }, function (error) {
+        showBanner('err', '复制失败：' + error.message);
+      });
+    });
+    document.addEventListener('keydown', function (event) {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
+        event.preventDefault();
+        save();
+      }
+    });
+    window.addEventListener('beforeunload', function (event) {
+      if (!state.dirty) { return undefined; }
+      event.preventDefault();
+      event.returnValue = '';
+      return '';
+    });
+  }
+
+  bindEvents();
+  loadMeta();
+})();
+</script>
+</body>
+</html>
