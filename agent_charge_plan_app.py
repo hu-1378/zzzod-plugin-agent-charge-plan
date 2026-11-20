@@ -41,6 +41,7 @@ from .operation.goto_agent_plan import GotoAgentPlan
 from .operation.read_agent_plan_list import ReadAgentPlanList
 from .operation.read_material_calc import MaterialGapSnapshot, ReadMaterialCalc
 from .planner.charge_budget import ChargeAvailability
+from .planner.material_goal import MaterialGoal, MaterialGoalPlanner, MaterialOwned
 from .planner.plan_mapper import PlanMapper
 from .planner.plan_models import PlanSnapshot
 from .planner.plan_writer import PlanWriter, content_key
@@ -182,7 +183,7 @@ class AgentChargePlanApp(ZApplication):
         对不到材料表就换不算出次数。要真正按材料排计划，得先补其中一样：
         材料图标模板，或者「养成指南 → 养成材料计算」那页的建档（明细表有名字）。
         """
-        op = ReadMaterialCalc(self.ctx, goto_first=False, allow_dialog_fallback=False)
+        op = ReadMaterialCalc(self.ctx, goto_first=False, allow_dialog_fallback=True)
         result = op.execute()
         if not result.is_success:
             # 读不到不算致命，照常往下走，只是少了材料这一档
@@ -220,15 +221,13 @@ class AgentChargePlanApp(ZApplication):
             include_drive_disc=self.config.include_drive_disc,
         )
         snapshot = PlanSnapshot.from_reader_snapshot(self.snapshot) if self.snapshot is not None else PlanSnapshot()
-        build_result = mapper.build(snapshot, available)
 
-        if self.material_gap is not None:
-            rows = self.material_gap.plan_row_list()
-            if not rows:
-                build_result.warnings.append(
-                    f'材料预览栏只有图标没有材料名（{self.material_gap.unnamed_count} 条），'
-                    '排不了材料计划。要按材料排，先补材料图标模板，或给「养成指南 → 养成材料计算」页建档'
-                )
+        # 材料库存目标：有配置就按缺口算出次数，和角色养成的条目合并后一起过电量预算
+        material_snapshot = self._build_material_snapshot()
+        if material_snapshot is not None:
+            snapshot.entries.extend(material_snapshot.entries)
+
+        build_result = mapper.build(snapshot, available)
 
         writer = PlanWriter(self.ctx)
         write_result = writer.write(
@@ -274,3 +273,45 @@ class AgentChargePlanApp(ZApplication):
         """回大世界，结束。"""
         op = BackToNormalWorld(self.ctx)
         return self.round_by_op_result(op.execute())
+
+    def _build_material_snapshot(self) -> PlanSnapshot | None:
+        """把「材料保持到 N」换算成计划条目。
+
+        需要两样东西：配置里的目标列表，和页面上读到的「已有数量」。
+        两个缺一个就只给提示、不生成条目（不让半截数据把计划写歪）。
+
+        Returns:
+            材料目标换算出来的清单；没配置或读不到就返回 None
+        """
+        goal_row_list = self.config.material_goals
+        if not goal_row_list:
+            return None
+
+        if self.material_gap is None:
+            log.warning('配了 %d 条材料目标，但这次没读到材料缺口，跳过材料排计划', len(goal_row_list))
+            return None
+
+        owned_map: dict[str, int] = {
+            item.material_name: item.owned
+            for item in self.material_gap.named_item_list
+            if item.owned is not None
+        }
+        if not owned_map:
+            log.warning(
+                '材料缺口里没有带材料名的条目（材料预览栏只有图标，看不懂是哪一种），跳过材料排计划',
+            )
+            return None
+
+        planner = MaterialGoalPlanner(default_plan_times=self.config.default_plan_times)
+        owned_list: list[MaterialOwned] = []
+        for goal_row in goal_row_list:
+            goal = MaterialGoal.from_row(goal_row)
+            owned_list.append(
+                MaterialOwned(goal=goal, owned=owned_map.get(goal.material_name))
+            )
+
+        snapshot, warnings = planner.build_snapshot(owned_list)
+        for warning in warnings:
+            log.warning(warning)
+        log.info('材料目标 %d 条，换算成 %d 条计划条目', len(goal_row_list), len(snapshot.entries))
+        return snapshot
