@@ -1,0 +1,1566 @@
+# 材料 → 体力副本入口 映射表
+# 由 agent_charge_plan 插件的 planner / 「材料保持指定值」读取。
+#
+# 数据来源（按可靠性排序）
+#   1. assets/game_data/compendium_data.yml —— 副本名 / mission_type / mission 名以它为准，
+#      每个 charge_source 的三元组都能在这份表里查到。
+#   2. BWIKI 材料筛选表（https://wiki.biligame.com/zzz/材料筛选）—— 材料名、类型、来源列。
+#   3. BWIKI 单材料页「用途 / 描述」—— 认证章顶级专名的专长归属；高维数据与稀有残留物对应的 boss。
+#   4. 截图 docs/screens/仓库-材料道具/、docs/screens/快捷手册/ —— DETAIL「[获取]」与电量档位。
+#
+# 字段约定
+#   category     agent_promotion（认证章）/ agent_skill（芯片、高维数据）/ wengine（组件）/
+#                basic（经验、镀剂、丁尼）/ expert_challenge（专业挑战室）/
+#                weekly_boss（恶名狩猎）/ not_farmable（不消耗电量）
+#   tier         同族 3 阶时 1/2/3，不适用为 null
+#   charge_source  category_name / mission_type_name / mission_name 三元组，
+#                  mission_name 为 null 表示副本表里该 category 只有 mission_type 层；
+#                  charge_per_run 为单次消耗电量
+#   amount_per_run 单次产出。公开资料没有稳定的「每次必掉 N 个」数值，全部留 null，
+#                  不猜数字（planner 会按刷 1 次后重算兜底）。
+#   farmable      false 表示不消耗电量、无法用体力刷，此时 charge_source 必须是 []
+#
+# charge_per_run 依据
+#   实战模拟室 20   —— 特训目标截图显示「20-100」（单次 20，最多 5 次）
+#   专业挑战室 40   —— 特训目标截图「提丰·重击者型」显示 40
+#   恶名狩猎   60   —— 任务书口径；恶名狩猎每周前 3 次免电量（截图未直接覆盖）
+#
+# 顶级认证章专名 ↔ 专长（逐条查 BWIKI 单材料页「用途」确认）
+#   先行者认证章 = 强攻 / 破阵者认证章 = 击破 / 掌控者认证章 = 异常 / 统御者认证章 = 支援 /
+#   捍卫者认证章 = 防护 / 裁决者认证章 = 命破 / 执锋者认证章 = 锋御
+#
+# 已知未核实项
+#   - 顶级/高阶/初阶认证章同属一个「X演练」，演练内按难度分档；难度与阶级的对应关系未在公开资料确认。
+#   - 稀有残留物「浊纹晶质」对应 boss 按排除法推得（魇缚者·叶释渊）。
+
+material_list:
+
+  # ---------- 认证章 —— 实战模拟室 / 代理人晋升（7 专长 × 3 阶） ----------
+  - material_name: '初阶强攻认证章'
+    aliases: []
+    category: agent_promotion
+    tier: 1
+    charge_source:
+      - category_name: '实战模拟室'
+        mission_type_name: '代理人晋升'
+        mission_name: '强攻演练'
+        charge_per_run: 20
+    amount_per_run: null
+    farmable: true
+    note: ''
+    source: 'BWIKI 材料筛选（来源：实战模拟室-代理人晋升）+ BWIKI 单材料页'
+  - material_name: '高阶强攻认证章'
+    aliases: []
+    category: agent_promotion
+    tier: 2
+    charge_source:
+      - category_name: '实战模拟室'
+        mission_type_name: '代理人晋升'
+        mission_name: '强攻演练'
+        charge_per_run: 20
+    amount_per_run: null
+    farmable: true
+    note: ''
+    source: 'BWIKI 材料筛选（来源：实战模拟室-代理人晋升）+ BWIKI 单材料页'
+  - material_name: '先行者认证章'
+    aliases: []
+    category: agent_promotion
+    tier: 3
+    charge_source:
+      - category_name: '实战模拟室'
+        mission_type_name: '代理人晋升'
+        mission_name: '强攻演练'
+        charge_per_run: 20
+    amount_per_run: null
+    farmable: true
+    note: ''
+    source: 'BWIKI 单材料页「用途」：可将「强攻」专长代理人的等级上限提升至60级；来源同为实战模拟室-代理人晋升'
+  - material_name: '初阶击破认证章'
+    aliases: []
+    category: agent_promotion
+    tier: 1
+    charge_source:
+      - category_name: '实战模拟室'
+        mission_type_name: '代理人晋升'
+        mission_name: '击破演练'
+        charge_per_run: 20
+    amount_per_run: null
+    farmable: true
+    note: ''
+    source: 'BWIKI 材料筛选（来源：实战模拟室-代理人晋升）+ BWIKI 单材料页'
+  - material_name: '高阶击破认证章'
+    aliases: []
+    category: agent_promotion
+    tier: 2
+    charge_source:
+      - category_name: '实战模拟室'
+        mission_type_name: '代理人晋升'
+        mission_name: '击破演练'
+        charge_per_run: 20
+    amount_per_run: null
+    farmable: true
+    note: ''
+    source: 'BWIKI 材料筛选（来源：实战模拟室-代理人晋升）+ BWIKI 单材料页'
+  - material_name: '破阵者认证章'
+    aliases: []
+    category: agent_promotion
+    tier: 3
+    charge_source:
+      - category_name: '实战模拟室'
+        mission_type_name: '代理人晋升'
+        mission_name: '击破演练'
+        charge_per_run: 20
+    amount_per_run: null
+    farmable: true
+    note: ''
+    source: 'BWIKI 单材料页「用途」：可将「击破」专长代理人的等级上限提升至60级；来源同为实战模拟室-代理人晋升'
+  - material_name: '初阶异常认证章'
+    aliases: []
+    category: agent_promotion
+    tier: 1
+    charge_source:
+      - category_name: '实战模拟室'
+        mission_type_name: '代理人晋升'
+        mission_name: '异常演练'
+        charge_per_run: 20
+    amount_per_run: null
+    farmable: true
+    note: ''
+    source: 'BWIKI 材料筛选（来源：实战模拟室-代理人晋升）+ BWIKI 单材料页'
+  - material_name: '高阶异常认证章'
+    aliases: []
+    category: agent_promotion
+    tier: 2
+    charge_source:
+      - category_name: '实战模拟室'
+        mission_type_name: '代理人晋升'
+        mission_name: '异常演练'
+        charge_per_run: 20
+    amount_per_run: null
+    farmable: true
+    note: ''
+    source: 'BWIKI 材料筛选（来源：实战模拟室-代理人晋升）+ BWIKI 单材料页'
+  - material_name: '掌控者认证章'
+    aliases: []
+    category: agent_promotion
+    tier: 3
+    charge_source:
+      - category_name: '实战模拟室'
+        mission_type_name: '代理人晋升'
+        mission_name: '异常演练'
+        charge_per_run: 20
+    amount_per_run: null
+    farmable: true
+    note: ''
+    source: 'BWIKI 单材料页「用途」：可将「异常」专长代理人的等级上限提升至60级；来源同为实战模拟室-代理人晋升'
+  - material_name: '初阶支援认证章'
+    aliases: []
+    category: agent_promotion
+    tier: 1
+    charge_source:
+      - category_name: '实战模拟室'
+        mission_type_name: '代理人晋升'
+        mission_name: '支援演练'
+        charge_per_run: 20
+    amount_per_run: null
+    farmable: true
+    note: ''
+    source: 'BWIKI 材料筛选（来源：实战模拟室-代理人晋升）+ BWIKI 单材料页'
+  - material_name: '高阶支援认证章'
+    aliases: []
+    category: agent_promotion
+    tier: 2
+    charge_source:
+      - category_name: '实战模拟室'
+        mission_type_name: '代理人晋升'
+        mission_name: '支援演练'
+        charge_per_run: 20
+    amount_per_run: null
+    farmable: true
+    note: ''
+    source: 'BWIKI 材料筛选（来源：实战模拟室-代理人晋升）+ BWIKI 单材料页'
+  - material_name: '统御者认证章'
+    aliases: []
+    category: agent_promotion
+    tier: 3
+    charge_source:
+      - category_name: '实战模拟室'
+        mission_type_name: '代理人晋升'
+        mission_name: '支援演练'
+        charge_per_run: 20
+    amount_per_run: null
+    farmable: true
+    note: ''
+    source: 'BWIKI 单材料页「用途」：可将「支援」专长代理人的等级上限提升至60级；来源同为实战模拟室-代理人晋升'
+  - material_name: '初阶防护认证章'
+    aliases: []
+    category: agent_promotion
+    tier: 1
+    charge_source:
+      - category_name: '实战模拟室'
+        mission_type_name: '代理人晋升'
+        mission_name: '防护演练'
+        charge_per_run: 20
+    amount_per_run: null
+    farmable: true
+    note: ''
+    source: 'BWIKI 材料筛选（来源：实战模拟室-代理人晋升）+ BWIKI 单材料页'
+  - material_name: '高阶防护认证章'
+    aliases: []
+    category: agent_promotion
+    tier: 2
+    charge_source:
+      - category_name: '实战模拟室'
+        mission_type_name: '代理人晋升'
+        mission_name: '防护演练'
+        charge_per_run: 20
+    amount_per_run: null
+    farmable: true
+    note: ''
+    source: 'BWIKI 材料筛选（来源：实战模拟室-代理人晋升）+ BWIKI 单材料页'
+  - material_name: '捍卫者认证章'
+    aliases: []
+    category: agent_promotion
+    tier: 3
+    charge_source:
+      - category_name: '实战模拟室'
+        mission_type_name: '代理人晋升'
+        mission_name: '防护演练'
+        charge_per_run: 20
+    amount_per_run: null
+    farmable: true
+    note: ''
+    source: 'BWIKI 单材料页「用途」：可将「防护」专长代理人的等级上限提升至60级；来源同为实战模拟室-代理人晋升'
+  - material_name: '初阶命破认证章'
+    aliases: []
+    category: agent_promotion
+    tier: 1
+    charge_source:
+      - category_name: '实战模拟室'
+        mission_type_name: '代理人晋升'
+        mission_name: '命破演练'
+        charge_per_run: 20
+    amount_per_run: null
+    farmable: true
+    note: ''
+    source: 'BWIKI 材料筛选（来源：实战模拟室-代理人晋升）+ BWIKI 单材料页'
+  - material_name: '高阶命破认证章'
+    aliases: []
+    category: agent_promotion
+    tier: 2
+    charge_source:
+      - category_name: '实战模拟室'
+        mission_type_name: '代理人晋升'
+        mission_name: '命破演练'
+        charge_per_run: 20
+    amount_per_run: null
+    farmable: true
+    note: ''
+    source: 'BWIKI 材料筛选（来源：实战模拟室-代理人晋升）+ BWIKI 单材料页'
+  - material_name: '裁决者认证章'
+    aliases: []
+    category: agent_promotion
+    tier: 3
+    charge_source:
+      - category_name: '实战模拟室'
+        mission_type_name: '代理人晋升'
+        mission_name: '命破演练'
+        charge_per_run: 20
+    amount_per_run: null
+    farmable: true
+    note: ''
+    source: 'BWIKI 单材料页「用途」：可将「命破」专长代理人的等级上限提升至60级；来源同为实战模拟室-代理人晋升'
+  - material_name: '初阶锋御认证章'
+    aliases: []
+    category: agent_promotion
+    tier: 1
+    charge_source:
+      - category_name: '实战模拟室'
+        mission_type_name: '代理人晋升'
+        mission_name: '锋御演练'
+        charge_per_run: 20
+    amount_per_run: null
+    farmable: true
+    note: ''
+    source: 'BWIKI 材料筛选（来源：实战模拟室-代理人晋升）+ BWIKI 单材料页'
+  - material_name: '高阶锋御认证章'
+    aliases: []
+    category: agent_promotion
+    tier: 2
+    charge_source:
+      - category_name: '实战模拟室'
+        mission_type_name: '代理人晋升'
+        mission_name: '锋御演练'
+        charge_per_run: 20
+    amount_per_run: null
+    farmable: true
+    note: ''
+    source: 'BWIKI 材料筛选（来源：实战模拟室-代理人晋升）+ BWIKI 单材料页'
+  - material_name: '执锋者认证章'
+    aliases: []
+    category: agent_promotion
+    tier: 3
+    charge_source:
+      - category_name: '实战模拟室'
+        mission_type_name: '代理人晋升'
+        mission_name: '锋御演练'
+        charge_per_run: 20
+    amount_per_run: null
+    farmable: true
+    note: ''
+    source: 'BWIKI 单材料页「用途」：可将「锋御」专长代理人的等级上限提升至60级；来源同为实战模拟室-代理人晋升'
+
+  # ---------- 组件 —— 实战模拟室 / 音擎改装（7 专长 × 3 阶） ----------
+  - material_name: '强攻组件'
+    aliases: []
+    category: wengine
+    tier: 1
+    charge_source:
+      - category_name: '实战模拟室'
+        mission_type_name: '音擎改装'
+        mission_name: '强攻极片试验'
+        charge_per_run: 20
+    amount_per_run: null
+    farmable: true
+    note: '音擎等级上限提升至 20 级所需的突破材料'
+    source: 'BWIKI 单材料页「用途」：可将「强攻」型音擎的等级上限提升至20级；来源实战模拟室-音擎改装'
+  - material_name: '增强型强攻组件'
+    aliases: []
+    category: wengine
+    tier: 2
+    charge_source:
+      - category_name: '实战模拟室'
+        mission_type_name: '音擎改装'
+        mission_name: '强攻极片试验'
+        charge_per_run: 20
+    amount_per_run: null
+    farmable: true
+    note: '音擎等级上限提升至 40 级所需的突破材料'
+    source: 'BWIKI 单材料页「用途」：可将「强攻」型音擎的等级上限提升至40级；来源实战模拟室-音擎改装'
+  - material_name: '特化型强攻组件'
+    aliases: []
+    category: wengine
+    tier: 3
+    charge_source:
+      - category_name: '实战模拟室'
+        mission_type_name: '音擎改装'
+        mission_name: '强攻极片试验'
+        charge_per_run: 20
+    amount_per_run: null
+    farmable: true
+    note: '音擎等级上限提升至 60 级所需的突破材料'
+    source: 'BWIKI 单材料页「用途」：可将「强攻」型音擎的等级上限提升至60级；来源实战模拟室-音擎改装'
+  - material_name: '击破组件'
+    aliases: []
+    category: wengine
+    tier: 1
+    charge_source:
+      - category_name: '实战模拟室'
+        mission_type_name: '音擎改装'
+        mission_name: '击破振膜试验'
+        charge_per_run: 20
+    amount_per_run: null
+    farmable: true
+    note: '音擎等级上限提升至 20 级所需的突破材料'
+    source: 'BWIKI 单材料页「用途」：可将「击破」型音擎的等级上限提升至20级；来源实战模拟室-音擎改装'
+  - material_name: '增强型击破组件'
+    aliases: []
+    category: wengine
+    tier: 2
+    charge_source:
+      - category_name: '实战模拟室'
+        mission_type_name: '音擎改装'
+        mission_name: '击破振膜试验'
+        charge_per_run: 20
+    amount_per_run: null
+    farmable: true
+    note: '音擎等级上限提升至 40 级所需的突破材料'
+    source: 'BWIKI 单材料页「用途」：可将「击破」型音擎的等级上限提升至40级；来源实战模拟室-音擎改装'
+  - material_name: '特化型击破组件'
+    aliases: []
+    category: wengine
+    tier: 3
+    charge_source:
+      - category_name: '实战模拟室'
+        mission_type_name: '音擎改装'
+        mission_name: '击破振膜试验'
+        charge_per_run: 20
+    amount_per_run: null
+    farmable: true
+    note: '音擎等级上限提升至 60 级所需的突破材料'
+    source: 'BWIKI 单材料页「用途」：可将「击破」型音擎的等级上限提升至60级；来源实战模拟室-音擎改装'
+  - material_name: '异常组件'
+    aliases: []
+    category: wengine
+    tier: 1
+    charge_source:
+      - category_name: '实战模拟室'
+        mission_type_name: '音擎改装'
+        mission_name: '异常磁体试验'
+        charge_per_run: 20
+    amount_per_run: null
+    farmable: true
+    note: '音擎等级上限提升至 20 级所需的突破材料'
+    source: 'BWIKI 单材料页「用途」：可将「异常」型音擎的等级上限提升至20级；来源实战模拟室-音擎改装'
+  - material_name: '增强型异常组件'
+    aliases: []
+    category: wengine
+    tier: 2
+    charge_source:
+      - category_name: '实战模拟室'
+        mission_type_name: '音擎改装'
+        mission_name: '异常磁体试验'
+        charge_per_run: 20
+    amount_per_run: null
+    farmable: true
+    note: '音擎等级上限提升至 40 级所需的突破材料'
+    source: 'BWIKI 单材料页「用途」：可将「异常」型音擎的等级上限提升至40级；来源实战模拟室-音擎改装'
+  - material_name: '特化型异常组件'
+    aliases: []
+    category: wengine
+    tier: 3
+    charge_source:
+      - category_name: '实战模拟室'
+        mission_type_name: '音擎改装'
+        mission_name: '异常磁体试验'
+        charge_per_run: 20
+    amount_per_run: null
+    farmable: true
+    note: '音擎等级上限提升至 60 级所需的突破材料'
+    source: 'BWIKI 单材料页「用途」：可将「异常」型音擎的等级上限提升至60级；来源实战模拟室-音擎改装'
+  - material_name: '支援组件'
+    aliases: []
+    category: wengine
+    tier: 1
+    charge_source:
+      - category_name: '实战模拟室'
+        mission_type_name: '音擎改装'
+        mission_name: '支援分频试验'
+        charge_per_run: 20
+    amount_per_run: null
+    farmable: true
+    note: '音擎等级上限提升至 20 级所需的突破材料'
+    source: 'BWIKI 单材料页「用途」：可将「支援」型音擎的等级上限提升至20级；来源实战模拟室-音擎改装'
+  - material_name: '增强型支援组件'
+    aliases: []
+    category: wengine
+    tier: 2
+    charge_source:
+      - category_name: '实战模拟室'
+        mission_type_name: '音擎改装'
+        mission_name: '支援分频试验'
+        charge_per_run: 20
+    amount_per_run: null
+    farmable: true
+    note: '音擎等级上限提升至 40 级所需的突破材料'
+    source: 'BWIKI 单材料页「用途」：可将「支援」型音擎的等级上限提升至40级；来源实战模拟室-音擎改装'
+  - material_name: '特化型支援组件'
+    aliases: []
+    category: wengine
+    tier: 3
+    charge_source:
+      - category_name: '实战模拟室'
+        mission_type_name: '音擎改装'
+        mission_name: '支援分频试验'
+        charge_per_run: 20
+    amount_per_run: null
+    farmable: true
+    note: '音擎等级上限提升至 60 级所需的突破材料'
+    source: 'BWIKI 单材料页「用途」：可将「支援」型音擎的等级上限提升至60级；来源实战模拟室-音擎改装'
+  - material_name: '防护组件'
+    aliases: []
+    category: wengine
+    tier: 1
+    charge_source:
+      - category_name: '实战模拟室'
+        mission_type_name: '音擎改装'
+        mission_name: '防护音圈试验'
+        charge_per_run: 20
+    amount_per_run: null
+    farmable: true
+    note: '音擎等级上限提升至 20 级所需的突破材料'
+    source: 'BWIKI 单材料页「用途」：可将「防护」型音擎的等级上限提升至20级；来源实战模拟室-音擎改装'
+  - material_name: '增强型防护组件'
+    aliases: []
+    category: wengine
+    tier: 2
+    charge_source:
+      - category_name: '实战模拟室'
+        mission_type_name: '音擎改装'
+        mission_name: '防护音圈试验'
+        charge_per_run: 20
+    amount_per_run: null
+    farmable: true
+    note: '音擎等级上限提升至 40 级所需的突破材料'
+    source: 'BWIKI 单材料页「用途」：可将「防护」型音擎的等级上限提升至40级；来源实战模拟室-音擎改装'
+  - material_name: '特化型防护组件'
+    aliases: []
+    category: wengine
+    tier: 3
+    charge_source:
+      - category_name: '实战模拟室'
+        mission_type_name: '音擎改装'
+        mission_name: '防护音圈试验'
+        charge_per_run: 20
+    amount_per_run: null
+    farmable: true
+    note: '音擎等级上限提升至 60 级所需的突破材料'
+    source: 'BWIKI 单材料页「用途」：可将「防护」型音擎的等级上限提升至60级；来源实战模拟室-音擎改装'
+  - material_name: '命破组件'
+    aliases: []
+    category: wengine
+    tier: 1
+    charge_source:
+      - category_name: '实战模拟室'
+        mission_type_name: '音擎改装'
+        mission_name: '命破共鸣试验'
+        charge_per_run: 20
+    amount_per_run: null
+    farmable: true
+    note: '音擎等级上限提升至 20 级所需的突破材料'
+    source: 'BWIKI 单材料页「用途」：可将「命破」型音擎的等级上限提升至20级；来源实战模拟室-音擎改装'
+  - material_name: '增强型命破组件'
+    aliases: []
+    category: wengine
+    tier: 2
+    charge_source:
+      - category_name: '实战模拟室'
+        mission_type_name: '音擎改装'
+        mission_name: '命破共鸣试验'
+        charge_per_run: 20
+    amount_per_run: null
+    farmable: true
+    note: '音擎等级上限提升至 40 级所需的突破材料'
+    source: 'BWIKI 单材料页「用途」：可将「命破」型音擎的等级上限提升至40级；来源实战模拟室-音擎改装'
+  - material_name: '特化型命破组件'
+    aliases: []
+    category: wengine
+    tier: 3
+    charge_source:
+      - category_name: '实战模拟室'
+        mission_type_name: '音擎改装'
+        mission_name: '命破共鸣试验'
+        charge_per_run: 20
+    amount_per_run: null
+    farmable: true
+    note: '音擎等级上限提升至 60 级所需的突破材料'
+    source: 'BWIKI 单材料页「用途」：可将「命破」型音擎的等级上限提升至60级；来源实战模拟室-音擎改装'
+  - material_name: '锋御组件'
+    aliases: []
+    category: wengine
+    tier: 1
+    charge_source:
+      - category_name: '实战模拟室'
+        mission_type_name: '音擎改装'
+        mission_name: '锋御耦合试验'
+        charge_per_run: 20
+    amount_per_run: null
+    farmable: true
+    note: '音擎等级上限提升至 20 级所需的突破材料'
+    source: 'BWIKI 单材料页「用途」：可将「锋御」型音擎的等级上限提升至20级；来源实战模拟室-音擎改装'
+  - material_name: '增强型锋御组件'
+    aliases: []
+    category: wengine
+    tier: 2
+    charge_source:
+      - category_name: '实战模拟室'
+        mission_type_name: '音擎改装'
+        mission_name: '锋御耦合试验'
+        charge_per_run: 20
+    amount_per_run: null
+    farmable: true
+    note: '音擎等级上限提升至 40 级所需的突破材料'
+    source: 'BWIKI 单材料页「用途」：可将「锋御」型音擎的等级上限提升至40级；来源实战模拟室-音擎改装'
+  - material_name: '特化型锋御组件'
+    aliases: []
+    category: wengine
+    tier: 3
+    charge_source:
+      - category_name: '实战模拟室'
+        mission_type_name: '音擎改装'
+        mission_name: '锋御耦合试验'
+        charge_per_run: 20
+    amount_per_run: null
+    farmable: true
+    note: '音擎等级上限提升至 60 级所需的突破材料'
+    source: 'BWIKI 单材料页「用途」：可将「锋御」型音擎的等级上限提升至60级；来源实战模拟室-音擎改装'
+
+  # ---------- 芯片 —— 实战模拟室 / 代理人技能（7 属性 × 3 阶） ----------
+  - material_name: '基础物理芯片'
+    aliases: []
+    category: agent_skill
+    tier: 1
+    charge_source:
+      - category_name: '实战模拟室'
+        mission_type_name: '代理人技能'
+        mission_name: '刚性测试'
+        charge_per_run: 20
+    amount_per_run: null
+    farmable: true
+    note: ''
+    source: '游戏内仓库 DETAIL「[获取]实战模拟室-代理人技能」截图 + BWIKI 材料筛选'
+  - material_name: '进阶物理芯片'
+    aliases: []
+    category: agent_skill
+    tier: 2
+    charge_source:
+      - category_name: '实战模拟室'
+        mission_type_name: '代理人技能'
+        mission_name: '刚性测试'
+        charge_per_run: 20
+    amount_per_run: null
+    farmable: true
+    note: ''
+    source: '游戏内仓库 DETAIL「[获取]实战模拟室-代理人技能」截图 + BWIKI 材料筛选'
+  - material_name: '特化物理芯片'
+    aliases: []
+    category: agent_skill
+    tier: 3
+    charge_source:
+      - category_name: '实战模拟室'
+        mission_type_name: '代理人技能'
+        mission_name: '刚性测试'
+        charge_per_run: 20
+    amount_per_run: null
+    farmable: true
+    note: ''
+    source: '游戏内仓库 DETAIL「[获取]实战模拟室-代理人技能」截图 + BWIKI 材料筛选'
+  - material_name: '基础引燃芯片'
+    aliases: []
+    category: agent_skill
+    tier: 1
+    charge_source:
+      - category_name: '实战模拟室'
+        mission_type_name: '代理人技能'
+        mission_name: '升温测试'
+        charge_per_run: 20
+    amount_per_run: null
+    farmable: true
+    note: ''
+    source: '游戏内仓库 DETAIL「[获取]实战模拟室-代理人技能」截图 + BWIKI 材料筛选'
+  - material_name: '进阶引燃芯片'
+    aliases: []
+    category: agent_skill
+    tier: 2
+    charge_source:
+      - category_name: '实战模拟室'
+        mission_type_name: '代理人技能'
+        mission_name: '升温测试'
+        charge_per_run: 20
+    amount_per_run: null
+    farmable: true
+    note: ''
+    source: '游戏内仓库 DETAIL「[获取]实战模拟室-代理人技能」截图 + BWIKI 材料筛选'
+  - material_name: '特化引燃芯片'
+    aliases: []
+    category: agent_skill
+    tier: 3
+    charge_source:
+      - category_name: '实战模拟室'
+        mission_type_name: '代理人技能'
+        mission_name: '升温测试'
+        charge_per_run: 20
+    amount_per_run: null
+    farmable: true
+    note: ''
+    source: '游戏内仓库 DETAIL「[获取]实战模拟室-代理人技能」截图 + BWIKI 材料筛选'
+  - material_name: '基础冰结芯片'
+    aliases: []
+    category: agent_skill
+    tier: 1
+    charge_source:
+      - category_name: '实战模拟室'
+        mission_type_name: '代理人技能'
+        mission_name: '冰结测试'
+        charge_per_run: 20
+    amount_per_run: null
+    farmable: true
+    note: ''
+    source: '游戏内仓库 DETAIL「[获取]实战模拟室-代理人技能」截图 + BWIKI 材料筛选'
+  - material_name: '进阶冰结芯片'
+    aliases: []
+    category: agent_skill
+    tier: 2
+    charge_source:
+      - category_name: '实战模拟室'
+        mission_type_name: '代理人技能'
+        mission_name: '冰结测试'
+        charge_per_run: 20
+    amount_per_run: null
+    farmable: true
+    note: ''
+    source: '游戏内仓库 DETAIL「[获取]实战模拟室-代理人技能」截图 + BWIKI 材料筛选'
+  - material_name: '特化冰结芯片'
+    aliases: []
+    category: agent_skill
+    tier: 3
+    charge_source:
+      - category_name: '实战模拟室'
+        mission_type_name: '代理人技能'
+        mission_name: '冰结测试'
+        charge_per_run: 20
+    amount_per_run: null
+    farmable: true
+    note: ''
+    source: '游戏内仓库 DETAIL「[获取]实战模拟室-代理人技能」截图 + BWIKI 材料筛选'
+  - material_name: '基础电击芯片'
+    aliases: []
+    category: agent_skill
+    tier: 1
+    charge_source:
+      - category_name: '实战模拟室'
+        mission_type_name: '代理人技能'
+        mission_name: '电流测试'
+        charge_per_run: 20
+    amount_per_run: null
+    farmable: true
+    note: ''
+    source: '游戏内仓库 DETAIL「[获取]实战模拟室-代理人技能」截图 + BWIKI 材料筛选'
+  - material_name: '进阶电击芯片'
+    aliases: []
+    category: agent_skill
+    tier: 2
+    charge_source:
+      - category_name: '实战模拟室'
+        mission_type_name: '代理人技能'
+        mission_name: '电流测试'
+        charge_per_run: 20
+    amount_per_run: null
+    farmable: true
+    note: ''
+    source: '游戏内仓库 DETAIL「[获取]实战模拟室-代理人技能」截图 + BWIKI 材料筛选'
+  - material_name: '特化电击芯片'
+    aliases: []
+    category: agent_skill
+    tier: 3
+    charge_source:
+      - category_name: '实战模拟室'
+        mission_type_name: '代理人技能'
+        mission_name: '电流测试'
+        charge_per_run: 20
+    amount_per_run: null
+    farmable: true
+    note: ''
+    source: '游戏内仓库 DETAIL「[获取]实战模拟室-代理人技能」截图 + BWIKI 材料筛选'
+  - material_name: '基础以太芯片'
+    aliases: []
+    category: agent_skill
+    tier: 1
+    charge_source:
+      - category_name: '实战模拟室'
+        mission_type_name: '代理人技能'
+        mission_name: '共鸣测试'
+        charge_per_run: 20
+    amount_per_run: null
+    farmable: true
+    note: ''
+    source: '游戏内仓库 DETAIL「[获取]实战模拟室-代理人技能」截图 + BWIKI 材料筛选'
+  - material_name: '进阶以太芯片'
+    aliases: []
+    category: agent_skill
+    tier: 2
+    charge_source:
+      - category_name: '实战模拟室'
+        mission_type_name: '代理人技能'
+        mission_name: '共鸣测试'
+        charge_per_run: 20
+    amount_per_run: null
+    farmable: true
+    note: ''
+    source: '游戏内仓库 DETAIL「[获取]实战模拟室-代理人技能」截图 + BWIKI 材料筛选'
+  - material_name: '特化以太芯片'
+    aliases: []
+    category: agent_skill
+    tier: 3
+    charge_source:
+      - category_name: '实战模拟室'
+        mission_type_name: '代理人技能'
+        mission_name: '共鸣测试'
+        charge_per_run: 20
+    amount_per_run: null
+    farmable: true
+    note: ''
+    source: '游戏内仓库 DETAIL「[获取]实战模拟室-代理人技能」截图 + BWIKI 材料筛选'
+  - material_name: '基础风蚀芯片'
+    aliases: []
+    category: agent_skill
+    tier: 1
+    charge_source:
+      - category_name: '实战模拟室'
+        mission_type_name: '代理人技能'
+        mission_name: '风切测试'
+        charge_per_run: 20
+    amount_per_run: null
+    farmable: true
+    note: ''
+    source: '游戏内仓库 DETAIL「[获取]实战模拟室-代理人技能」截图 + BWIKI 材料筛选'
+  - material_name: '进阶风蚀芯片'
+    aliases: []
+    category: agent_skill
+    tier: 2
+    charge_source:
+      - category_name: '实战模拟室'
+        mission_type_name: '代理人技能'
+        mission_name: '风切测试'
+        charge_per_run: 20
+    amount_per_run: null
+    farmable: true
+    note: ''
+    source: '游戏内仓库 DETAIL「[获取]实战模拟室-代理人技能」截图 + BWIKI 材料筛选'
+  - material_name: '特化风蚀芯片'
+    aliases: []
+    category: agent_skill
+    tier: 3
+    charge_source:
+      - category_name: '实战模拟室'
+        mission_type_name: '代理人技能'
+        mission_name: '风切测试'
+        charge_per_run: 20
+    amount_per_run: null
+    farmable: true
+    note: ''
+    source: '游戏内仓库 DETAIL「[获取]实战模拟室-代理人技能」截图 + BWIKI 材料筛选'
+  - material_name: '基础流明芯片'
+    aliases: []
+    category: agent_skill
+    tier: 1
+    charge_source:
+      - category_name: '实战模拟室'
+        mission_type_name: '代理人技能'
+        mission_name: '琢光测试'
+        charge_per_run: 20
+    amount_per_run: null
+    farmable: true
+    note: ''
+    source: '游戏内仓库 DETAIL「[获取]实战模拟室-代理人技能」截图 + BWIKI 材料筛选'
+  - material_name: '进阶流明芯片'
+    aliases: []
+    category: agent_skill
+    tier: 2
+    charge_source:
+      - category_name: '实战模拟室'
+        mission_type_name: '代理人技能'
+        mission_name: '琢光测试'
+        charge_per_run: 20
+    amount_per_run: null
+    farmable: true
+    note: ''
+    source: '游戏内仓库 DETAIL「[获取]实战模拟室-代理人技能」截图 + BWIKI 材料筛选'
+  - material_name: '特化流明芯片'
+    aliases: []
+    category: agent_skill
+    tier: 3
+    charge_source:
+      - category_name: '实战模拟室'
+        mission_type_name: '代理人技能'
+        mission_name: '琢光测试'
+        charge_per_run: 20
+    amount_per_run: null
+    farmable: true
+    note: ''
+    source: '游戏内仓库 DETAIL「[获取]实战模拟室-代理人技能」截图 + BWIKI 材料筛选'
+
+  # ---------- 高维数据 —— 专业挑战室 ----------
+  - material_name: '高维数据：凶刑讣告'
+    aliases:
+      - '凶刑讣告'
+    category: expert_challenge
+    tier: null
+    charge_source:
+      - category_name: '专业挑战室'
+        mission_type_name: '恶名·杜拉罕'
+        mission_name: null
+        charge_per_run: 40
+    amount_per_run: null
+    farmable: true
+    note: '实装版本 1.0；核心技升级材料'
+    source: 'BWIKI 单材料页「描述」点明 boss「恶名·杜拉罕」+ 材料筛选（来源：专业挑战室）'
+  - material_name: '高维数据：殷红震慑'
+    aliases:
+      - '殷红震慑'
+    category: expert_challenge
+    tier: null
+    charge_source:
+      - category_name: '专业挑战室'
+        mission_type_name: '祸首·通缉打手'
+        mission_name: null
+        charge_per_run: 40
+    amount_per_run: null
+    farmable: true
+    note: '实装版本 1.0；核心技升级材料'
+    source: 'BWIKI 单材料页「描述」点明 boss「祸首·通缉打手」+ 材料筛选（来源：专业挑战室）'
+  - material_name: '高维数据：追袭骸影'
+    aliases:
+      - '追袭骸影'
+    category: expert_challenge
+    tier: null
+    charge_source:
+      - category_name: '专业挑战室'
+        mission_type_name: '恶名·装甲哈提'
+        mission_name: null
+        charge_per_run: 40
+    amount_per_run: null
+    farmable: true
+    note: '实装版本 1.0；核心技升级材料'
+    source: 'BWIKI 单材料页「描述」点明 boss「恶名·装甲哈提」+ 材料筛选（来源：专业挑战室）'
+  - material_name: '高维数据：钢铁恶意'
+    aliases:
+      - '钢铁恶意'
+    category: expert_challenge
+    tier: null
+    charge_source:
+      - category_name: '专业挑战室'
+        mission_type_name: '汉斯·蓄能型'
+        mission_name: null
+        charge_per_run: 40
+    amount_per_run: null
+    farmable: true
+    note: '实装版本 1.0；核心技升级材料'
+    source: 'BWIKI 单材料页「描述」点明 boss「汉斯·蓄能型」+ 材料筛选（来源：专业挑战室）'
+  - material_name: '高维数据：毁荡突进'
+    aliases:
+      - '毁荡突进'
+    category: expert_challenge
+    tier: null
+    charge_source:
+      - category_name: '专业挑战室'
+        mission_type_name: '「提丰·重击者型」'
+        mission_name: null
+        charge_per_run: 40
+    amount_per_run: null
+    farmable: true
+    note: '实装版本 1.0；核心技升级材料'
+    source: 'BWIKI 单材料页「描述」点明 boss「提丰·重击者型」+ 材料筛选（来源：专业挑战室）'
+  - material_name: '高维数据：拳坠如陨'
+    aliases:
+      - '拳坠如陨'
+    category: expert_challenge
+    tier: null
+    charge_source:
+      - category_name: '专业挑战室'
+        mission_type_name: '蛮横力士'
+        mission_name: null
+        charge_per_run: 40
+    amount_per_run: null
+    farmable: true
+    note: '实装版本 1.1；核心技升级材料'
+    source: 'BWIKI 单材料页「描述」点明 boss「蛮横力士」+ 材料筛选（来源：专业挑战室）'
+  - material_name: '高维数据：潜袭魅影'
+    aliases:
+      - '潜袭魅影'
+    category: expert_challenge
+    tier: null
+    charge_source:
+      - category_name: '专业挑战室'
+        mission_type_name: '多佩冈亚·简'
+        mission_name: null
+        charge_per_run: 40
+    amount_per_run: null
+    farmable: true
+    note: '实装版本 1.2；核心技升级材料'
+    source: 'BWIKI 单材料页「描述」点明 boss「多佩冈亚·简」+ 材料筛选（来源：专业挑战室）'
+  - material_name: '高维数据：游鳞雷动'
+    aliases:
+      - '游鳞雷动'
+    category: expert_challenge
+    tier: null
+    charge_source:
+      - category_name: '专业挑战室'
+        mission_type_name: '色雷斯人'
+        mission_name: null
+        charge_per_run: 40
+    amount_per_run: null
+    farmable: true
+    note: '实装版本 1.4；核心技升级材料'
+    source: 'BWIKI 单材料页「描述」点明 boss「色雷斯人」+ 材料筛选（来源：专业挑战室）'
+  - material_name: '高维数据：索命切割'
+    aliases:
+      - '索命切割'
+    category: expert_challenge
+    tier: null
+    charge_source:
+      - category_name: '专业挑战室'
+        mission_type_name: '伐木机'
+        mission_name: null
+        charge_per_run: 40
+    amount_per_run: null
+    farmable: true
+    note: '实装版本 1.6；核心技升级材料'
+    source: 'BWIKI 单材料页「描述」点明 boss「伐木机」+ 材料筛选（来源：专业挑战室）'
+  - material_name: '高维数据：鞘翅秽种'
+    aliases:
+      - '鞘翅秽种'
+    category: expert_challenge
+    tier: null
+    charge_source:
+      - category_name: '专业挑战室'
+        mission_type_name: '秽息蚀者·阿瓦鲁斯'
+        mission_name: null
+        charge_per_run: 40
+    amount_per_run: null
+    farmable: true
+    note: '实装版本 2.0；核心技升级材料'
+    source: 'BWIKI 单材料页「描述」点明 boss「秽息蚀者·阿瓦鲁斯」+ 材料筛选（来源：专业挑战室）'
+  - material_name: '高维数据：诡运毒锋'
+    aliases:
+      - '诡运毒锋'
+    category: expert_challenge
+    tier: null
+    charge_source:
+      - category_name: '专业挑战室'
+        mission_type_name: '牲鬼·凶魁愚者'
+        mission_name: null
+        charge_per_run: 40
+    amount_per_run: null
+    farmable: true
+    note: '实装版本 2.1；核心技升级材料'
+    source: 'BWIKI 单材料页「描述」点明 boss「牲鬼·凶魁愚者」+ 材料筛选（来源：专业挑战室）'
+  - material_name: '高维数据：蚀梦残铁'
+    aliases:
+      - '蚀梦残铁'
+    category: expert_challenge
+    tier: null
+    charge_source:
+      - category_name: '专业挑战室'
+        mission_type_name: '秽蚀·狛野真斗'
+        mission_name: null
+        charge_per_run: 40
+    amount_per_run: null
+    farmable: true
+    note: '实装版本 2.3；核心技升级材料'
+    source: 'BWIKI 单材料页「描述」点明 boss「秽蚀·狛野真斗」+ 材料筛选（来源：专业挑战室）'
+  - material_name: '高维数据：淬刺蚀芯'
+    aliases:
+      - '淬刺蚀芯'
+    category: expert_challenge
+    tier: null
+    charge_source:
+      - category_name: '专业挑战室'
+        mission_type_name: '秽息行者·蝎骸'
+        mission_name: null
+        charge_per_run: 40
+    amount_per_run: null
+    farmable: true
+    note: '实装版本 2.5；核心技升级材料'
+    source: 'BWIKI 单材料页「描述」点明 boss「秽息行者·蝎骸」+ 材料筛选（来源：专业挑战室）'
+  - material_name: '高维数据：喋血秽羽'
+    aliases:
+      - '喋血秽羽'
+    category: expert_challenge
+    tier: null
+    charge_source:
+      - category_name: '专业挑战室'
+        mission_type_name: '牲鬼·卫律使者'
+        mission_name: null
+        charge_per_run: 40
+    amount_per_run: null
+    farmable: true
+    note: '实装版本 2.6；核心技升级材料'
+    source: 'BWIKI 单材料页「描述」点明 boss「牲鬼·卫律使者」+ 材料筛选（来源：专业挑战室）'
+  - material_name: '高维数据：深蚀回路'
+    aliases:
+      - '深蚀回路'
+    category: expert_challenge
+    tier: null
+    charge_source:
+      - category_name: '专业挑战室'
+        mission_type_name: '空域戒戍者'
+        mission_name: null
+        charge_per_run: 40
+    amount_per_run: null
+    farmable: true
+    note: '实装版本 3.0；核心技升级材料'
+    source: 'BWIKI 单材料页「描述」点明 boss「空域戒戍者」+ 材料筛选（来源：专业挑战室）'
+  - material_name: '高维数据：拟造核心'
+    aliases:
+      - '拟造核心'
+    category: expert_challenge
+    tier: null
+    charge_source:
+      - category_name: '专业挑战室'
+        mission_type_name: '「征服者」'
+        mission_name: null
+        charge_per_run: 40
+    amount_per_run: null
+    farmable: true
+    note: '实装版本 3.2；核心技升级材料'
+    source: 'BWIKI 单材料页「描述」点明 boss「征服者」+ 材料筛选（来源：专业挑战室）'
+
+  # ---------- 稀有残留物 —— 恶名狩猎 ----------
+  - material_name: '腥风之握'
+    aliases: []
+    category: weekly_boss
+    tier: null
+    charge_source:
+      - category_name: '恶名狩猎'
+        mission_type_name: '初生死路屠夫'
+        mission_name: null
+        charge_per_run: 60
+    amount_per_run: null
+    farmable: true
+    note: '实装版本 1.0；高等级核心技材料；恶名狩猎每周前 3 次免电量'
+    source: 'BWIKI 单材料页「描述」点明 boss「初生死路屠夫」+ 材料筛选（来源：恶名狩猎）'
+  - material_name: '活态驱动'
+    aliases: []
+    category: weekly_boss
+    tier: null
+    charge_source:
+      - category_name: '恶名狩猎'
+        mission_type_name: '未知复合侵蚀体'
+        mission_name: null
+        charge_per_run: 60
+    amount_per_run: null
+    farmable: true
+    note: '实装版本 1.0；高等级核心技材料；恶名狩猎每周前 3 次免电量'
+    source: 'BWIKI 单材料页「描述」点明 boss「未知复合侵蚀体」+ 材料筛选（来源：恶名狩猎）'
+  - material_name: '终幕舞鞋'
+    aliases: []
+    category: weekly_boss
+    tier: null
+    charge_source:
+      - category_name: '恶名狩猎'
+        mission_type_name: '冥宁芙·双子'
+        mission_name: null
+        charge_per_run: 60
+    amount_per_run: null
+    farmable: true
+    note: '实装版本 1.0；高等级核心技材料；恶名狩猎每周前 3 次免电量'
+    source: 'BWIKI 单材料页「描述」点明 boss「冥宁芙·双子」+ 材料筛选（来源：恶名狩猎）'
+  - material_name: '猩红引擎'
+    aliases: []
+    category: weekly_boss
+    tier: null
+    charge_source:
+      - category_name: '恶名狩猎'
+        mission_type_name: '「霸主侵蚀体·庞培」'
+        mission_name: null
+        charge_per_run: 60
+    amount_per_run: null
+    farmable: true
+    note: '实装版本 1.2；高等级核心技材料；恶名狩猎每周前 3 次免电量'
+    source: 'BWIKI 单材料页「描述」点明 boss「霸主侵蚀体·庞培」+ 材料筛选（来源：恶名狩猎）'
+  - material_name: '狂信之塑'
+    aliases: []
+    category: weekly_boss
+    tier: null
+    charge_source:
+      - category_name: '恶名狩猎'
+        mission_type_name: '牲鬼·布林格'
+        mission_name: null
+        charge_per_run: 60
+    amount_per_run: null
+    farmable: true
+    note: '实装版本 1.4；高等级核心技材料；恶名狩猎每周前 3 次免电量'
+    source: 'BWIKI 单材料页「描述」点明 boss「牲鬼·布林格」+ 材料筛选（来源：恶名狩猎）'
+  - material_name: '塑炼遗蜕'
+    aliases: []
+    category: weekly_boss
+    tier: null
+    charge_source:
+      - category_name: '恶名狩猎'
+        mission_type_name: '秽息司祭'
+        mission_name: null
+        charge_per_run: 60
+    amount_per_run: null
+    farmable: true
+    note: '实装版本 2.0；高等级核心技材料；恶名狩猎每周前 3 次免电量'
+    source: 'BWIKI 单材料页「描述」点明 boss「秽息司祭」+ 材料筛选（来源：恶名狩猎）'
+  - material_name: '秽红晶刺'
+    aliases: []
+    category: weekly_boss
+    tier: null
+    charge_source:
+      - category_name: '恶名狩猎'
+        mission_type_name: '彷徨猎手'
+        mission_name: null
+        charge_per_run: 60
+    amount_per_run: null
+    farmable: true
+    note: '实装版本 2.3；高等级核心技材料；恶名狩猎每周前 3 次免电量'
+    source: 'BWIKI 单材料页「描述」点明 boss「彷徨猎手」+ 材料筛选（来源：恶名狩猎）'
+  - material_name: '浊纹晶质'
+    aliases: []
+    category: weekly_boss
+    tier: null
+    charge_source:
+      - category_name: '恶名狩猎'
+        mission_type_name: '魇缚者·叶释渊'
+        mission_name: null
+        charge_per_run: 60
+    amount_per_run: null
+    farmable: true
+    note: 'BWIKI 描述写「取自受魇缚者役使的巨兽『索贝克』」，本条按「恶名狩猎 11 个 boss ↔ 11 种残留物」+ 版本 2.5 排除法推得，待游戏内核实；实装版本 2.5；高等级核心技材料；恶名狩猎每周前 3 次免电量'
+    source: 'BWIKI 单材料页「描述」点明 boss「魇缚者·叶释渊」+ 材料筛选（来源：恶名狩猎）'
+  - material_name: '吮髓之棘'
+    aliases: []
+    category: weekly_boss
+    tier: null
+    charge_source:
+      - category_name: '恶名狩猎'
+        mission_type_name: '猎血清道夫'
+        mission_name: null
+        charge_per_run: 60
+    amount_per_run: null
+    farmable: true
+    note: '实装版本 2.7；高等级核心技材料；恶名狩猎每周前 3 次免电量'
+    source: 'BWIKI 单材料页「描述」点明 boss「猎血清道夫」+ 材料筛选（来源：恶名狩猎）'
+  - material_name: '刻命残蜕'
+    aliases: []
+    category: weekly_boss
+    tier: null
+    charge_source:
+      - category_name: '恶名狩猎'
+        mission_type_name: '基塔布鲁'
+        mission_name: null
+        charge_per_run: 60
+    amount_per_run: null
+    farmable: true
+    note: '实装版本 3.0；高等级核心技材料；恶名狩猎每周前 3 次免电量'
+    source: 'BWIKI 单材料页「描述」点明 boss「基塔布鲁」+ 材料筛选（来源：恶名狩猎）'
+  - material_name: '赝造离核'
+    aliases: []
+    category: weekly_boss
+    tier: null
+    charge_source:
+      - category_name: '恶名狩猎'
+        mission_type_name: '库萨里库'
+        mission_name: null
+        charge_per_run: 60
+    amount_per_run: null
+    farmable: true
+    note: '实装版本 3.2；高等级核心技材料；恶名狩猎每周前 3 次免电量'
+    source: 'BWIKI 单材料页「描述」点明 boss「库萨里库」+ 材料筛选（来源：恶名狩猎）'
+
+  # ---------- 基础材料 / 经验 / 镀剂 / 丁尼 —— 实战模拟室 / 基础材料 ----------
+  - material_name: '见习调查员记录'
+    aliases: []
+    category: basic
+    tier: 1
+    charge_source:
+      - category_name: '实战模拟室'
+        mission_type_name: '基础材料'
+        mission_name: '调查专项'
+        charge_per_run: 20
+    amount_per_run: null
+    farmable: true
+    note: '角色经验；阶级 1/3'
+    source: 'BWIKI 材料筛选（来源：实战模拟室-基础材料）+ 特训目标截图（电量 20-100）'
+  - material_name: '正式调查员记录'
+    aliases: []
+    category: basic
+    tier: 2
+    charge_source:
+      - category_name: '实战模拟室'
+        mission_type_name: '基础材料'
+        mission_name: '调查专项'
+        charge_per_run: 20
+    amount_per_run: null
+    farmable: true
+    note: '角色经验；阶级 2/3'
+    source: 'BWIKI 材料筛选（来源：实战模拟室-基础材料）+ 特训目标截图（电量 20-100）'
+  - material_name: '资深调查员记录'
+    aliases: []
+    category: basic
+    tier: 3
+    charge_source:
+      - category_name: '实战模拟室'
+        mission_type_name: '基础材料'
+        mission_name: '调查专项'
+        charge_per_run: 20
+    amount_per_run: null
+    farmable: true
+    note: '角色经验；阶级 3/3'
+    source: 'BWIKI 材料筛选（来源：实战模拟室-基础材料）+ 特训目标截图（电量 20-100）'
+  - material_name: '音擎蓄电池'
+    aliases:
+      - '蓄电池'
+    category: basic
+    tier: 1
+    charge_source:
+      - category_name: '实战模拟室'
+        mission_type_name: '基础材料'
+        mission_name: '音擎专项'
+        charge_per_run: 20
+    amount_per_run: null
+    farmable: true
+    note: '音擎经验；阶级 1/3'
+    source: 'BWIKI 材料筛选（来源：实战模拟室-基础材料）+ 特训目标截图（电量 20-100）'
+  - material_name: '变频音擎电源'
+    aliases: []
+    category: basic
+    tier: 2
+    charge_source:
+      - category_name: '实战模拟室'
+        mission_type_name: '基础材料'
+        mission_name: '音擎专项'
+        charge_per_run: 20
+    amount_per_run: null
+    farmable: true
+    note: '音擎经验；阶级 2/3'
+    source: 'BWIKI 材料筛选（来源：实战模拟室-基础材料）+ 特训目标截图（电量 20-100）'
+  - material_name: '音擎能源模块'
+    aliases: []
+    category: basic
+    tier: 3
+    charge_source:
+      - category_name: '实战模拟室'
+        mission_type_name: '基础材料'
+        mission_name: '音擎专项'
+        charge_per_run: 20
+    amount_per_run: null
+    farmable: true
+    note: '音擎经验；阶级 3/3'
+    source: 'BWIKI 材料筛选（来源：实战模拟室-基础材料）+ 特训目标截图（电量 20-100）'
+  - material_name: '塑化镀剂'
+    aliases: []
+    category: basic
+    tier: 1
+    charge_source:
+      - category_name: '实战模拟室'
+        mission_type_name: '基础材料'
+        mission_name: '镀剂专项'
+        charge_per_run: 20
+    amount_per_run: null
+    farmable: true
+    note: '驱动盘经验；阶级 1/3'
+    source: 'BWIKI 材料筛选（来源：实战模拟室-基础材料）+ 特训目标截图（电量 20-100）'
+  - material_name: '晶质镀剂'
+    aliases: []
+    category: basic
+    tier: 2
+    charge_source:
+      - category_name: '实战模拟室'
+        mission_type_name: '基础材料'
+        mission_name: '镀剂专项'
+        charge_per_run: 20
+    amount_per_run: null
+    farmable: true
+    note: '驱动盘经验；阶级 2/3'
+    source: 'BWIKI 材料筛选（来源：实战模拟室-基础材料）+ 特训目标截图（电量 20-100）'
+  - material_name: '以太镀剂'
+    aliases: []
+    category: basic
+    tier: 3
+    charge_source:
+      - category_name: '实战模拟室'
+        mission_type_name: '基础材料'
+        mission_name: '镀剂专项'
+        charge_per_run: 20
+    amount_per_run: null
+    farmable: true
+    note: '驱动盘经验；阶级 3/3'
+    source: 'BWIKI 材料筛选（来源：实战模拟室-基础材料）+ 特训目标截图（电量 20-100）'
+  - material_name: '丁尼'
+    aliases: []
+    category: basic
+    tier: null
+    charge_source:
+      - category_name: '实战模拟室'
+        mission_type_name: '基础材料'
+        mission_name: '赏金专项'
+        charge_per_run: 20
+    amount_per_run: null
+    farmable: true
+    note: '通用货币；副本单次产出波动大，不填单次产出'
+    source: 'BWIKI 材料筛选（来源：实战模拟室-基础材料）+ 特训目标截图（电量 20-100）'
+
+  # ---------- 不可体力刷（farmable: false，charge_source: []） ----------
+  - material_name: '菲林'
+    aliases: []
+    category: not_farmable
+    tier: null
+    charge_source: []
+    amount_per_run: null
+    farmable: false
+    note: '来源：活动、任务、绳网等级'
+    source: 'BWIKI 材料筛选（来源：活动、任务、绳网等级）；不消耗电量，无法用体力刷'
+  - material_name: '加密母带'
+    aliases: []
+    category: not_farmable
+    tier: null
+    charge_source: []
+    amount_per_run: null
+    farmable: false
+    note: '来源：信号余波兑换、母带兑换'
+    source: 'BWIKI 材料筛选（来源：信号余波兑换、母带兑换）；不消耗电量，无法用体力刷'
+  - material_name: '原装母带'
+    aliases: []
+    category: not_farmable
+    tier: null
+    charge_source: []
+    amount_per_run: null
+    farmable: false
+    note: '来源：绳网、零号空洞'
+    source: 'BWIKI 材料筛选（来源：绳网、零号空洞）；不消耗电量，无法用体力刷'
+  - material_name: '邦布券'
+    aliases: []
+    category: not_farmable
+    tier: null
+    charge_source: []
+    amount_per_run: null
+    farmable: false
+    note: '来源：零号空洞、拉力委托、嗯呢币兑换、EVENTS'
+    source: 'BWIKI 材料筛选（来源：零号空洞、拉力委托、嗯呢币兑换、EVENTS）；不消耗电量，无法用体力刷'
+  - material_name: '信号余波'
+    aliases: []
+    category: not_farmable
+    tier: null
+    charge_source: []
+    amount_per_run: null
+    farmable: false
+    note: '来源：调频'
+    source: 'BWIKI 材料筛选（来源：调频）；不消耗电量，无法用体力刷'
+  - material_name: '嗯呢币'
+    aliases: []
+    category: not_farmable
+    tier: null
+    charge_source: []
+    amount_per_run: null
+    farmable: false
+    note: '来源：调频'
+    source: 'BWIKI 材料筛选（来源：调频）；不消耗电量，无法用体力刷'
+  - material_name: '信号残响'
+    aliases: []
+    category: not_farmable
+    tier: null
+    charge_source: []
+    amount_per_run: null
+    farmable: false
+    note: '来源：调频'
+    source: 'BWIKI 材料筛选（来源：调频）；不消耗电量，无法用体力刷'
+  - material_name: '储值电卡'
+    aliases: []
+    category: not_farmable
+    tier: null
+    charge_source: []
+    amount_per_run: null
+    farmable: false
+    note: '来源：丽都周纪、情报板-点数兑换、信号残响兑换'
+    source: 'BWIKI 材料筛选（来源：丽都周纪、情报板-点数兑换、信号残响兑换）；不消耗电量，无法用体力刷'
+  - material_name: '以太电池'
+    aliases: []
+    category: not_farmable
+    tier: null
+    charge_source: []
+    amount_per_run: null
+    farmable: false
+    note: '来源：合成、零号空洞-迷失之地、绳网等级奖励、丽都城募'
+    source: 'BWIKI 材料筛选（来源：合成、零号空洞-迷失之地、绳网等级奖励、丽都城募）；不消耗电量，无法用体力刷'
+  - material_name: '「仓鼠笼」访问器'
+    aliases:
+      - '仓鼠笼访问器'
+    category: not_farmable
+    tier: null
+    charge_source: []
+    amount_per_run: null
+    farmable: false
+    note: '来源：丽都城募、EVENTS'
+    source: 'BWIKI 材料筛选（来源：丽都城募、EVENTS）；不消耗电量，无法用体力刷'
+  - material_name: '初铸勋章'
+    aliases: []
+    category: not_farmable
+    tier: null
+    charge_source: []
+    amount_per_run: null
+    farmable: false
+    note: '来源：绳网等级晋升、丽都城募'
+    source: 'BWIKI 材料筛选（来源：绳网等级晋升、丽都城募）；不消耗电量，无法用体力刷'
+  - material_name: '原装芯片'
+    aliases: []
+    category: not_farmable
+    tier: null
+    charge_source: []
+    amount_per_run: null
+    farmable: false
+    note: '来源：丽都城募'
+    source: 'BWIKI 材料筛选（来源：丽都城募）；不消耗电量，无法用体力刷'
+  - material_name: '通用组件'
+    aliases: []
+    category: not_farmable
+    tier: null
+    charge_source: []
+    amount_per_run: null
+    farmable: false
+    note: '来源：绳网等级晋升、丽都城募'
+    source: 'BWIKI 材料筛选（来源：绳网等级晋升、丽都城募）；不消耗电量，无法用体力刷'
+  - material_name: '降噪处理母盘'
+    aliases: []
+    category: not_farmable
+    tier: null
+    charge_source: []
+    amount_per_run: null
+    farmable: false
+    note: '来源：零号空洞、驱动盘拆解'
+    source: 'BWIKI 材料筛选（来源：零号空洞、驱动盘拆解）；不消耗电量，无法用体力刷'
+  - material_name: '音质增强母盘'
+    aliases: []
+    category: not_farmable
+    tier: null
+    charge_source: []
+    amount_per_run: null
+    farmable: false
+    note: '来源：零号空洞、驱动盘拆解'
+    source: 'BWIKI 材料筛选（来源：零号空洞、驱动盘拆解）；不消耗电量，无法用体力刷'
+  - material_name: '高保真母盘'
+    aliases: []
+    category: not_farmable
+    tier: null
+    charge_source: []
+    amount_per_run: null
+    farmable: false
+    note: '来源：零号空洞、驱动盘拆解'
+    source: 'BWIKI 材料筛选（来源：零号空洞、驱动盘拆解）；不消耗电量，无法用体力刷'
+  - material_name: '邦布系统控件'
+    aliases: []
+    category: not_farmable
+    tier: null
+    charge_source: []
+    amount_per_run: null
+    farmable: false
+    note: '来源：零号空洞、信号余波兑换、嗯呢币兑换'
+    source: 'BWIKI 材料筛选（来源：零号空洞、信号余波兑换、嗯呢币兑换）；不消耗电量，无法用体力刷'
+  - material_name: '邦布算法模块'
+    aliases: []
+    category: not_farmable
+    tier: null
+    charge_source: []
+    amount_per_run: null
+    farmable: false
+    note: '来源：零号空洞'
+    source: 'BWIKI 材料筛选（来源：零号空洞）；不消耗电量，无法用体力刷'
+  - material_name: '邦布软件补丁'
+    aliases: []
+    category: not_farmable
+    tier: null
+    charge_source: []
+    amount_per_run: null
+    farmable: false
+    note: '来源：零号空洞'
+    source: 'BWIKI 材料筛选（来源：零号空洞）；不消耗电量，无法用体力刷'
+  - material_name: '浓缩型冷却液'
+    aliases: []
+    category: not_farmable
+    tier: null
+    charge_source: []
+    amount_per_run: null
+    farmable: false
+    note: '来源：零号空洞、合成'
+    source: 'BWIKI 材料筛选（来源：零号空洞、合成）；不消耗电量，无法用体力刷'
+  - material_name: '能量循环液'
+    aliases: []
+    category: not_farmable
+    tier: null
+    charge_source: []
+    amount_per_run: null
+    farmable: false
+    note: '来源：零号空洞、合成、分解'
+    source: 'BWIKI 材料筛选（来源：零号空洞、合成、分解）；不消耗电量，无法用体力刷'
+  - material_name: '以太电解液'
+    aliases: []
+    category: not_farmable
+    tier: null
+    charge_source: []
+    amount_per_run: null
+    farmable: false
+    note: '来源：零号空洞、分解'
+    source: 'BWIKI 材料筛选（来源：零号空洞、分解）；不消耗电量，无法用体力刷'
