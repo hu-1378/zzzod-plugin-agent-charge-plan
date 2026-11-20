@@ -356,9 +356,13 @@ def parse_preview_lines(
 
         text, owned, required = progress
         button_text = pick_button_text(row)
-        # 页面上够不够其实看数字就行；按钮只是个旁证，对不上时记一笔，不改判定
-        if button_text and button_text in PREVIEW_BUTTON_TEXT_LIST[2:] and owned < required:
-            warnings.append(f'{text} 右侧按钮是「{button_text}」，但已有少于所需，按数字算')
+        # 页面上够不够其实看数字就行；按钮只是旁证。
+        # 预览栏里只有两种按钮：「获取」= 还不够、「养成」= 已经够了。
+        # 所以「养成」却说数字不够时，记一笔（不改判定，以数字为准）。
+        if button_text == PREVIEW_BUTTON_TEXT_LIST[1] and owned < required:
+            warnings.append(
+                f'{text} 右侧按钮是「{button_text}」（表示已经够了），但已有少于所需，按数字算'
+            )
 
         item_list.append(
             MaterialGapItem(
