@@ -139,7 +139,7 @@ class AgentChargePlanApp(ZApplication):
         if not result.success:
             return self.round_by_op_result(result)
 
-        data = op.data
+        data = result.data
         if not isinstance(data, AgentNameList):
             return self.round_fail('扫描没有返回名单')
         for warning in data.warnings:
@@ -196,7 +196,7 @@ class AgentChargePlanApp(ZApplication):
         if not result.success:
             return self.round_by_op_result(result)
 
-        snapshot = op.data
+        snapshot = result.data
         if not isinstance(snapshot, AgentPlanSnapshot):
             return self.round_fail('清单读取没有返回数据')
         self.snapshot_list = [snapshot]
@@ -222,13 +222,13 @@ class AgentChargePlanApp(ZApplication):
 
             read_op = ReadAgentPlanList(self.ctx, goto_first=False)
             read_result = read_op.execute()
-            if not read_result.success or not isinstance(read_op.data, AgentPlanSnapshot):
+            if not read_result.success or not isinstance(read_result.data, AgentPlanSnapshot):
                 log.warning('读「%s」的清单失败：%s', name, read_result.status)
                 failed_name_list.append(name)
                 continue
 
-            self.snapshot_list.append(read_op.data)
-            self._log_snapshot(read_op.data)
+            self.snapshot_list.append(read_result.data)
+            self._log_snapshot(read_result.data)
 
         # 无论成功几个，都把特训目标恢复成进来时的那个，别把用户的设置改坏
         if original_name:
@@ -313,7 +313,7 @@ class AgentChargePlanApp(ZApplication):
             log.warning('材料缺口没读出来：%s', result.status)
             return self.round_success('材料缺口没读到')
 
-        gap = op.data
+        gap = result.data
         if not isinstance(gap, MaterialGapSnapshot):
             return self.round_success('材料缺口没读到')
         self.material_gap = gap
