@@ -22,12 +22,19 @@
 「先读材料预览，读不到再走这条路」；不想要这条路就把构造参数的
 `allow_dialog_fallback` 传 False，这时材料预览读不到会直接失败，不会乱点。
 
+反过来，如果调用方**就是要带材料名的数据**（按材料排计划只能靠名字），传
+`prefer_dialog=True` 直接走这条路，材料预览读得到也不用。
+
+走完这条路会点一次弹窗右上角的「关闭」，把界面放回养成指南页——留在弹窗里后续流程
+（回大世界、换别的应用）会踩到弹窗。读失败时也尽力关掉，别把界面留在弹窗上。
+**未验证**：重复进入时会再点一次「确定」，这个重复点击是否幂等没实测。
+
 中间每一步都有独立节点、独立失败状态：哪个画面没到、哪个按钮没找到，都写进 status，
 不会静默跳过然后交一份空数据上去。
 
 **注意**：这条路涉及的三页（养成方案详情 / 养成指南 / 养成材料计算弹窗）里，
 养成方案详情页和养成材料计算弹窗有留档截图，养成指南页只有一张「方案概览」的截图。
-点「更多方案」「养成材料计算」「确定」这几个动作的坐标是照建档写的，**未实机验证**。
+点「更多方案」「养成材料计算」「确定」「关闭」这几个动作的坐标是照建档写的，**未实机验证**。
 
 ## 游戏内 10 分钟延迟（硬约束，别在这文件里做闭环）
 
@@ -101,6 +108,8 @@ CALC_SCREEN: str = '养成材料计算'
 AREA_CALC_TITLE: str = '标题-养成材料计算'
 #: 设置页底部的「确定」，点完同一弹窗内切到结果页
 AREA_CALC_CONFIRM: str = '按钮-确定'
+#: 弹窗右上角的「关闭」，读完结果后点它回养成指南页
+AREA_CALC_CLOSE: str = '按钮-关闭'
 #: 结果页二：养成材料明细四列表整块
 AREA_CALC_DETAIL_TABLE: str = '区域-明细表'
 #: 结果页二的四列（列 x 固定）
@@ -138,6 +147,10 @@ ICON_SATISFIED_TEXT: str = '已满足'
 
 #: 点按钮后等界面反应的时间（秒）
 CLICK_WAIT: float = 1.2
+#: 点「确定」后结果页还没出来时，等多久再读一次（秒）
+RESULT_RETRY_WAIT: float = 1.0
+#: 点完「关闭」后等弹窗收起来的时间（秒）
+CLOSE_WAIT: float = 1.0
 
 #: 明细表四列在 `column_block_list` 里的下标记号
 COLUMN_NAME: int = 0
@@ -151,6 +164,10 @@ STATUS_PREVIEW_EMPTY: str = '材料预览没读到'
 STATUS_GUIDE_READY: str = '已在养成指南页'
 #: 节点状态：弹窗已经开着
 STATUS_DIALOG_OPEN: str = '弹窗已开'
+#: 节点状态：明细表读到数据了
+STATUS_DETAIL_READ: str = '明细表读到数据'
+#: 节点状态：明细表没读到数据（还要走收尾把弹窗关掉）
+STATUS_DETAIL_EMPTY: str = '明细表没读到数据'
 
 
 # ============================= 数据结构 =============================
@@ -761,11 +778,17 @@ def _area(ctx: ZContext, screen_name: str, area_name: str) -> Rect | None:
 class ReadMaterialCalc(ZOperation):
     """读材料缺口。结果的 data 是 `MaterialGapSnapshot`。
 
-    顺序：先读养成方案详情页右侧的「材料预览」栏（路径 A，最省事）；
-    读不到时（且 `allow_dialog_fallback` 没关）再走
-    「更多方案 → 养成指南 → 养成材料计算 → 确定 → 明细表」（路径 B，能拿到材料名）。
+    三种走法：
+
+    - 默认：先读养成方案详情页右侧的「材料预览」栏（路径 A，最省事）；
+      读不到时（且 `allow_dialog_fallback` 没关）再走
+      「更多方案 → 养成指南 → 养成材料计算 → 确定 → 明细表」（路径 B，能拿到材料名）。
+    - `prefer_dialog=True`：跳过材料预览，直接走路径 B。原因是材料预览只有图标没有名字，
+      想「按材料排计划」就得要带名字的那份。
+    - `allow_dialog_fallback=False`：只读材料预览，读不到就让这次操作失败。
 
     导航链路的失败都是显式的：哪个画面没到、哪个按钮没找到，都写在 status 里。
+    走完路径 B 会把弹窗关掉（成功失败都关），不留界面在弹窗里。
     """
 
     def __init__(
@@ -773,6 +796,7 @@ class ReadMaterialCalc(ZOperation):
         ctx: ZContext,
         goto_first: bool = True,
         allow_dialog_fallback: bool = True,
+        prefer_dialog: bool = False,
     ) -> None:
         """
         构造函数。
@@ -782,20 +806,38 @@ class ReadMaterialCalc(ZOperation):
             goto_first: 调用前没在特训目标页时，是否自己先走过去
             allow_dialog_fallback: 材料预览栏读不到时，要不要走「养成指南 → 养成材料计算」
                 弹窗那条路。默认开；传 False 时读不到就直接失败，不多点几下
+            prefer_dialog: 直接走弹窗那条路，材料预览读得到也不读。默认 False。
+                和 allow_dialog_fallback=False 同时传时以本参数为准（要带名字的数据）；
+                这条路没走通就整个失败，**不会回头再读材料预览**
         """
         ZOperation.__init__(self, ctx, op_name='读取材料缺口')
+
+        if prefer_dialog and not allow_dialog_fallback:
+            log.warning('prefer_dialog 和 allow_dialog_fallback=False 同时传了，按 prefer_dialog 走弹窗路径')
 
         self.goto_first: bool = goto_first
         """没在特训目标页时是否自己导航过去"""
 
         self.allow_dialog_fallback: bool = allow_dialog_fallback
-        """材料预览读不到时是否试弹窗路径"""
+        """材料预览读不到时是否走弹窗路径"""
+
+        self.prefer_dialog: bool = prefer_dialog
+        """是否跳过材料预览、直接走弹窗路径（要材料名时用）"""
 
         self.agent_name: str = ''
         """代理人名字，读得到就带上"""
 
         self.snapshot: MaterialGapSnapshot = MaterialGapSnapshot()
         """正在拼的结果"""
+
+        self.fail_status: str = ''
+        """弹窗路径里没走通的原因。走到「关掉弹窗」时用它决定这次操作是成是败"""
+
+    def handle_init(self) -> None:
+        """每次执行前把上一次跑留下的中间状态清干净，免得同实例复用时结果串味。"""
+        self.agent_name = ''
+        self.snapshot = MaterialGapSnapshot()
+        self.fail_status = ''
 
     @operation_node(name='确认特训目标页', is_start_node=True, node_max_retry_times=3)
     def ensure_page(self) -> OperationRoundResult:
@@ -845,7 +887,15 @@ class ReadMaterialCalc(ZOperation):
     @node_from(from_name='确认养成方案详情')
     @operation_node(name='读材料预览')
     def read_preview(self) -> OperationRoundResult:
-        """读右侧「材料预览」栏的已有/所需。"""
+        """读右侧「材料预览」栏的已有/所需。
+
+        调用方要带材料名的数据（`prefer_dialog=True`）时直接跳过这一栏，
+        复用「材料预览没读到」那个状态往下走弹窗路径，少一次没用的 OCR。
+        """
+        if self.prefer_dialog:
+            log.info('按调用方要求跳过材料预览，直接走弹窗路径（材料名只有弹窗结果页才有）')
+            return self.round_success(status=STATUS_PREVIEW_EMPTY)
+
         agent_name = read_guide_agent_name(self.ctx, self.last_screenshot)
         if agent_name:
             self.agent_name = agent_name
@@ -984,36 +1034,49 @@ class ReadMaterialCalc(ZOperation):
         if self._is_dialog_open():
             return self.round_success(status=STATUS_DIALOG_OPEN)
         if self.node_retry_times >= self.node_max_retry_times - 1:
-            return self.round_fail(
-                status='点了「养成材料计算」但弹窗没弹出来：标题「养成材料计算」没找到'
-            )
+            self.fail_status = '点了「养成材料计算」但弹窗没弹出来：标题「养成材料计算」没找到'
+            return self.round_fail(status=self.fail_status)
         return self.round_retry(status='还没看到材料计算弹窗标题，等一下再看', wait=1)
 
     @node_from(from_name='确认弹窗已开', status=STATUS_DIALOG_OPEN)
     @operation_node(name='点确定出结果', node_max_retry_times=5)
     def confirm_calc(self) -> OperationRoundResult:
-        """弹窗设置页点「确定」，同一弹窗内切到结果页。"""
+        """弹窗设置页点「确定」，同一弹窗内切到结果页。
+
+        注意：重复进入（比如上次停在结果页没关弹窗）会再点一次「确定」，
+        这个重复点击是否幂等**没有实机验证**。
+        """
         if self.node_retry_times >= self.node_max_retry_times - 1:
-            return self.round_fail(
-                status='材料计算弹窗里没找到「确定」按钮（区域 975,895-1390,980）'
-            )
-        return self.round_by_find_and_click_area(
+            self.fail_status = '材料计算弹窗里没找到「确定」按钮（区域 975,895-1390,980）'
+            return self.round_fail(status=self.fail_status)
+        result = self.round_by_find_and_click_area(
             self.last_screenshot,
             CALC_SCREEN,
             AREA_CALC_CONFIRM,
             success_wait=CLICK_WAIT,
             retry_wait=1,
         )
+        if result.is_fail:
+            # 区域没配或者点不动，记一笔原因，交给「关掉弹窗」收尾
+            self.fail_status = '点「确定」失败：材料计算弹窗的「按钮-确定」点不到'
+        return result
 
     @node_from(from_name='点确定出结果')
-    @operation_node(name='读明细表')
+    @operation_node(name='读明细表', node_max_retry_times=2)
     def read_detail_table(self) -> OperationRoundResult:
         """读结果页的四列明细表 + 「需要获取的材料」概况。
 
-        一行都没读到时再分一次：看到表头说明结果页出来了、只是没数据；
-        连表头都没有说明「确定」没生效，结果页没出来。两种都明确失败，不交空数据。
+        刚点完「确定」时结果页可能还在加载，所以读到空会**等一秒再读一次**（框架的节点重试），
+        两次都空才算真的没数据。两次都空时再分两种原因：看到表头 = 结果页出来了但没数据行；
+        连表头都没有 = 「确定」没生效、结果页没出来。
+
+        读到数据、没读到数据都往下交给「关掉弹窗」收尾，别把界面留在弹窗上。
         """
         item_list, summary, warnings = read_calc_detail(self.ctx, self.last_screenshot)
+        if not item_list and self.node_retry_times < self.node_max_retry_times - 1:
+            log.info('明细表一环都没读到，等 %.1f 秒再读一次（结果页可能还在加载）', RESULT_RETRY_WAIT)
+            return self.round_retry(status='明细表还没读到数据，等一秒再读一次', wait=RESULT_RETRY_WAIT)
+
         self.snapshot = MaterialGapSnapshot(
             source=SOURCE_CALC_DETAIL,
             agent_name=self.agent_name,
@@ -1027,17 +1090,37 @@ class ReadMaterialCalc(ZOperation):
             summary.gap_count,
             summary.satisfied_count,
         )
-        if not item_list:
-            if has_detail_table_header(self.ctx, self.last_screenshot):
-                return self.round_fail(
-                    status='明细表有表头但没有数据行：可能还没加载完，或表格需要往下滚',
-                    data=self.snapshot,
-                )
-            return self.round_fail(
-                status='点了「确定」但结果页没出来：明细表表头「所需 / 已有」没找到',
-                data=self.snapshot,
-            )
-        return self.round_success(status=f'明细表读到 {len(item_list)} 行', data=self.snapshot)
+        if item_list:
+            return self.round_success(status=STATUS_DETAIL_READ)
+        if has_detail_table_header(self.ctx, self.last_screenshot):
+            self.fail_status = '明细表有表头但没有数据行：可能还没加载完，或表格需要往下滚'
+        else:
+            self.fail_status = '点了「确定」但结果页没出来：明细表表头「所需 / 已有」没找到'
+        return self.round_success(status=STATUS_DETAIL_EMPTY)
+
+    @node_from(from_name='读明细表')
+    @node_from(from_name='确认弹窗已开', success=False)
+    @node_from(from_name='点确定出结果', success=False)
+    @operation_node(name='关掉弹窗')
+    def close_dialog(self) -> OperationRoundResult:
+        """收尾：点弹窗右上角的「关闭」，把界面放回养成指南页。
+
+        留在弹窗里，后续流程（回大世界、换别的应用）会踩到弹窗，所以读失败时也尽力关掉。
+        关不掉本身不算读取失败，只在 warnings 里记一笔。
+
+        Returns:
+            读到数据就成功，没读到就失败（原因用 `fail_status` 里那条）
+        """
+        if self._is_dialog_open():
+            self._close_calc_dialog()
+
+        if self.fail_status:
+            return self.round_fail(status=self.fail_status, data=self.snapshot)
+        if not self.snapshot.item_list:
+            return self.round_fail(status='明细表一行都没读到', data=self.snapshot)
+        return self.round_success(
+            status=f'明细表读到 {len(self.snapshot.item_list)} 行，弹窗已关', data=self.snapshot
+        )
 
     def _is_guide_page(self) -> bool:
         """现在是不是停在养成方案详情页（靠「更多方案」按钮认）。"""
@@ -1062,6 +1145,39 @@ class ReadMaterialCalc(ZOperation):
         return self.round_by_find_area(
             self.last_screenshot, CALC_SCREEN, AREA_CALC_TITLE
         ).is_success
+
+    def _close_calc_dialog(self) -> None:
+        """点弹窗右上角的「关闭」，把界面放回养成指南页。
+
+        关不掉只往 warnings 里记一笔，不改这次操作的成功失败——
+        读到的数据已经拿到了，关窗失败是界面卫生问题，不是读数问题。
+        """
+        area = calc_area(self.ctx, AREA_CALC_CLOSE)
+        if area is None:
+            self.snapshot.warnings.append(
+                f'{CALC_SCREEN}.{AREA_CALC_CLOSE} 区域没配置，读完没法关弹窗'
+            )
+            return
+
+        result = self.round_by_find_and_click_area(
+            self.last_screenshot,
+            CALC_SCREEN,
+            AREA_CALC_CLOSE,
+            success_wait=CLOSE_WAIT,
+            retry_wait=1,
+        )
+        if not result.is_success:
+            self.snapshot.warnings.append(
+                '点「关闭」没成功，材料计算弹窗可能还开着，下次跑之前先手动关一下'
+            )
+            return
+
+        # 点完重新截一张，确认弹窗真的没了（旧截图里弹窗还在，拿它判断会误报）
+        self.screenshot()
+        if self._is_dialog_open():
+            self.snapshot.warnings.append(
+                '点了「关闭」但弹窗标题还在，弹窗可能没关上，下次跑之前先手动关一下'
+            )
 
 
 def __debug() -> None:
