@@ -62,6 +62,12 @@ class ReadAgentPlanList(ZOperation):
         self.scroll_times: int = 0
         """已经往下滚了几次"""
 
+        self.last_fingerprint: str = ''
+        """上一屏的文字指纹。同一屏再读一次指纹不变，用来识别「拖拽没生效」"""
+
+        self.stuck_times: int = 0
+        """连续几次拖拽后画面没变化的计数"""
+
     @operation_node(name='确认页面', is_start_node=True, node_max_retry_times=3)
     def ensure_page(self) -> OperationRoundResult:
         """确认停在特训目标页。允许自己导航过去。"""
@@ -109,8 +115,24 @@ class ReadAgentPlanList(ZOperation):
             len(self.item_list),
         )
 
+        fingerprint = '|'.join(sorted(block.text for block in block_list))
+        same_screen = fingerprint == self.last_fingerprint and fingerprint != ''
+        self.last_fingerprint = fingerprint
+
         if self.scroll_times > 0 and new_count == 0:
+            if same_screen:
+                # 画面一个字都没变，说明这一下拖拽没生效（惯性/边界），再拖一次。
+                # 连着两次没变化才当成真的到底，否则会静默漏掉条目。
+                self.stuck_times += 1
+                if self.stuck_times >= 2:
+                    log.warning('连续两次滚动画面没变化，当成到底；如果实际还有条目，调大这里或改拖拽距离')
+                    return self.round_success(status='已经滚到底', data=self._make_snapshot())
+                self._drag_plan_list(downward=True)
+                self.scroll_times += 1
+                return self.round_wait(status='画面没变化，再滚一次', wait=SCROLL_WAIT)
             return self.round_success(status='已经滚到底', data=self._make_snapshot())
+
+        self.stuck_times = 0
         if self.scroll_times >= MAX_SCROLL_TIMES:
             return self.round_success(status='滚动次数达到上限', data=self._make_snapshot())
 

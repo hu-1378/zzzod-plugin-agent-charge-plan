@@ -31,7 +31,11 @@ from .agent_charge_plan_config import (
     GOAL_MODE_MATERIAL_FLOOR,
     AgentChargePlanConfig,
 )
-from .operation.agent_plan_page import AgentPlanSnapshot, read_agent_name
+from .operation.agent_plan_page import (
+    AgentPlanSnapshot,
+    agent_name_similar,
+    read_agent_name,
+)
 from .operation.change_agent_plan_target import ChangeAgentPlanTarget
 from .operation.goto_agent_plan import GotoAgentPlan
 from .operation.read_agent_plan_list import ReadAgentPlanList
@@ -107,7 +111,7 @@ class AgentChargePlanApp(ZApplication):
         current = read_agent_name(self.ctx, self.last_screenshot)
         if current == '':
             return self.round_retry('没读到当前的代理人名字', wait=1)
-        if current == target:
+        if agent_name_similar(current, target):
             return self.round_success(f'已经是 {target}')
 
         op = ChangeAgentPlanTarget(self.ctx, target_agent_name=target, goto_first=False)
@@ -153,6 +157,15 @@ class AgentChargePlanApp(ZApplication):
             self.backup_charge_power = 0
             self.ether_battery = 0
             return self.round_success('电量识别失败，按上限估')
+
+        if battery <= 0:
+            # 内置的 _parse_battery_charge_ocr 在全字段识别失败时不抛异常，而是返回 (0, 0, 0)，
+            # 直接拿 0 去算预算会把所有条目压成「今天不够跑一次」，所以这里也要降级。
+            log.warning(
+                '电量识别结果是 0（多半是识别失败），按自然电量上限 %s 处理',
+                self.DEFAULT_NATURAL_CHARGE,
+            )
+            battery = self.DEFAULT_NATURAL_CHARGE
 
         self.charge_power = battery
         self.backup_charge_power = backup

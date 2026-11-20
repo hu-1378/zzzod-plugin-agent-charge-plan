@@ -322,6 +322,7 @@ class ChargeBudget:
                 plan_times=1,
                 card_num=card_num,
                 charge_per_run=per_run,
+                charge_total=per_run,
                 note=f'今天电量不够跑一次（一次 {per_run} 点），先排 1 次，等电量回来了再跑',
             )
 
