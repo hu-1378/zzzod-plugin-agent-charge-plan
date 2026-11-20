@@ -9,7 +9,6 @@ from __future__ import annotations
 import time
 from typing import TYPE_CHECKING
 
-from one_dragon.base.geometry.point import Point
 from one_dragon.base.geometry.rectangle import Rect
 from one_dragon.base.operation.operation_edge import node_from
 from one_dragon.base.operation.operation_node import operation_node
@@ -29,8 +28,10 @@ if TYPE_CHECKING:
 BACK_TO_TOP_TIMES: int = 6
 #: 往下最多滚几次。防止界面异常时死循环
 MAX_SCROLL_TIMES: int = 12
-#: 拖拽时离清单区上下边缘留多少像素
-SCROLL_MARGIN: int = 90
+#: 滚动起点在一屏里的纵向比例（0 顶部、1 底部）。和终点一起决定一次滚多远
+SCROLL_START_RATIO: float = 0.84
+#: 滚动终点比例。0.84 -> 0.16 相当于一次滚 68% 的区域高度
+SCROLL_END_RATIO: float = 0.16
 #: 拖拽全程耗时。调大 = 滑得慢一点，更容易控制距离
 SCROLL_DRAG_SECONDS: float = 0.9
 #: 滚动后等界面停稳的时间（秒）。太短会在惯性还没停时截图
@@ -153,19 +154,24 @@ class ReadAgentPlanList(ZOperation):
         )
 
     def _drag_plan_list(self, downward: bool) -> None:
-        """在清单区里拖一下，让列表往下（或往上）滚。
+        """在清单区里滚动一屏。
+
+        滚动走 screen_areas.scroll_rect，算法和项目标准的
+        one_dragon.base.screen.screen_utils.scroll_area 一样（比例 + 时长），
+        只是这里用的是兜底 Rect 而不是 ScreenArea。
 
         Args:
-            downward: True 表示看后面的条目（手指从下往上滑），False 表示回顶部
+            downward: True 看下面的内容；False 往回滚
         """
         area: Rect = self._plan_list_rect()
-        x: int = area.center.x
-        top: Point = Point(x, area.y1 + SCROLL_MARGIN)
-        bottom: Point = Point(x, area.y2 - SCROLL_MARGIN)
-        if downward:
-            self.ctx.controller.drag_to(start=bottom, end=top, duration=SCROLL_DRAG_SECONDS)
-        else:
-            self.ctx.controller.drag_to(start=top, end=bottom, duration=SCROLL_DRAG_SECONDS)
+        screen_areas.scroll_rect(
+            self.ctx,
+            area,
+            direction='down' if downward else 'up',
+            start_ratio=SCROLL_START_RATIO,
+            end_ratio=SCROLL_END_RATIO,
+            duration=SCROLL_DRAG_SECONDS,
+        )
 
 
 def __debug() -> None:

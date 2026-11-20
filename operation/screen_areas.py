@@ -16,6 +16,7 @@
 
 from typing import TYPE_CHECKING
 
+from one_dragon.base.geometry.point import Point
 from one_dragon.base.geometry.rectangle import Rect
 
 if TYPE_CHECKING:
@@ -73,3 +74,51 @@ def get_area_rect(ctx: 'ZContext', screen_name: str, area_name: str) -> Rect:
         raise KeyError(f'没有为 {screen_name}.{area_name} 准备兜底坐标')
     left, top, right, bottom = fallback
     return Rect(left, top, right, bottom)
+
+
+def scroll_rect(
+    ctx: 'ZContext',
+    rect: Rect,
+    direction: str = 'down',
+    start_ratio: float = 0.84,
+    end_ratio: float = 0.16,
+    duration: float = 0.9,
+) -> None:
+    """在一个矩形范围内按住拖动来滚动。
+
+    算法和参数含义照搬项目标准的 `one_dragon.base.screen.screen_utils.scroll_area`，
+    区别只是这里接受 `Rect` 而不是 `ScreenArea`——特训目标页的清单区可能是本文件里的
+    兜底坐标，没有对应的 ScreenArea 对象。
+
+    Args:
+        ctx: 一条龙上下文
+        rect: 要滚动的区域
+        direction: `down` 表示看下面的内容（手势往上划），`up` 反之
+        start_ratio: 起点在这块区域的纵向比例，0 是顶部、1 是底部
+        end_ratio: 终点比例
+        duration: 拖动全程耗时（秒）。调大 = 滑得慢，更容易控制距离
+    """
+    height: int = rect.height
+    start_ratio = max(0.0, min(1.0, start_ratio))
+    end_ratio = max(0.0, min(1.0, end_ratio))
+    y_start: int = rect.y1 + int(height * start_ratio)
+    y_end: int = rect.y1 + int(height * end_ratio)
+    x: int = rect.center.x
+
+    if direction == 'up':
+        # 往上翻：手势从下往上
+        start = Point(x, y_end)
+        end = Point(x, y_start)
+    else:
+        # 往下翻：手势从上往下拖
+        start = Point(x, y_start)
+        end = Point(x, y_end)
+
+    # 起终点重合时说明这块区域高度是 0，挪一个像素避免「没滚动」
+    if start.y == end.y:
+        if start.y >= rect.center.y:
+            end = Point(end.x, max(rect.y1 + 1, end.y - 1))
+        else:
+            end = Point(end.x, min(rect.y2 - 1, end.y + 1))
+
+    ctx.controller.drag_to(start=start, end=end, duration=duration)
