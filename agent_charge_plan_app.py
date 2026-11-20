@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from one_dragon.base.operation.application.application_const import DEFAULT_GROUP_ID
 from one_dragon.base.operation.operation_edge import node_from
 from one_dragon.base.operation.operation_node import operation_node
 from one_dragon.base.operation.operation_notify import NotifyTiming, node_notify
@@ -62,18 +63,38 @@ class AgentChargePlanApp(ZApplication):
     #: 电量没读出来时按自然电量上限算，宁可少排也不要排多
     DEFAULT_NATURAL_CHARGE: int = 240
 
-    def __init__(self, ctx: ZContext) -> None:
-        """只传上下文；配置和运行记录由框架按账号自己取。"""
+    def __init__(
+        self,
+        ctx: ZContext,
+        instance_idx: int | None = None,
+        group_id: str | None = None,
+    ) -> None:
+        """建应用。
+
+        Args:
+            ctx: 一条龙上下文
+            instance_idx: 账号下标。不传就用当前账号（工厂调用时框架会传）
+            group_id: 应用组。不传就用默认组（工厂调用时框架会传）
+
+        注意：`run_context.current_group_id` 是在 `create_application` **之后**才赋值的，
+        在构造函数里读它拿不到，所以这里必须由工厂把两个值传进来，或者用默认值兜底。
+        """
         ZApplication.__init__(
             self,
             ctx=ctx,
             app_id=agent_charge_plan_const.APP_ID,
             op_name=agent_charge_plan_const.APP_NAME,
         )
+        self.instance_idx: int = (
+            instance_idx if instance_idx is not None else self.ctx.current_instance_idx
+        )
+        """账号下标，读写配置时用"""
+        self.group_id: str = group_id if group_id else DEFAULT_GROUP_ID
+        """应用组，读写配置时用"""
         self.config: AgentChargePlanConfig = self.ctx.run_context.get_config(
             app_id=agent_charge_plan_const.APP_ID,
-            instance_idx=self.ctx.current_instance_idx,
-            group_id=self.ctx.current_group_id,
+            instance_idx=self.instance_idx,
+            group_id=self.group_id,
         )
         #: 读到的特训目标清单
         self.snapshot: AgentPlanSnapshot | None = None
@@ -244,8 +265,8 @@ class AgentChargePlanApp(ZApplication):
         writer = PlanWriter(self.ctx)
         write_result = writer.write(
             build_result,
-            instance_idx=self.ctx.current_instance_idx,
-            group_id=self.ctx.current_group_id,
+            instance_idx=self.instance_idx,
+            group_id=self.group_id,
             dry_run=self.config.dry_run,
             remove_keys=self.config.last_generated_keys,
         )

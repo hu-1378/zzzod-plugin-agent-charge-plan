@@ -27,8 +27,12 @@ class AgentChargePlanFactory(ApplicationFactory):
         self.ctx: ZContext = ctx
 
     def create_application(self, instance_idx: int, group_id: str) -> AgentChargePlanApp:
-        """建应用；账号和应用组由框架的配置、运行记录按下标自己取。"""
-        return AgentChargePlanApp(self.ctx)
+        """建应用。
+
+        账号下标和应用组必须由这里传进去：框架是在 create_application **之后**才把
+        `run_context.current_instance_idx / current_group_id` 赋上的，应用在构造里读不到。
+        """
+        return AgentChargePlanApp(self.ctx, instance_idx=instance_idx, group_id=group_id)
 
     def create_config(self, instance_idx: int, group_id: str) -> AgentChargePlanConfig:
         """建配置，按账号下标和应用组落到各自的 YAML。"""
