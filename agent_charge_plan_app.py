@@ -41,6 +41,7 @@ from .operation.change_agent_plan_target import ChangeAgentPlanTarget
 from .operation.goto_agent_plan import GotoAgentPlan
 from .operation.read_agent_plan_list import ReadAgentPlanList
 from .operation.read_material_calc import MaterialGapSnapshot, ReadMaterialCalc
+from .operation.scan_agent_list import AgentNameList, ScanAgentList
 from .planner.charge_budget import ChargeAvailability
 from .planner.material_goal import (
     MaterialGoal,
@@ -97,7 +98,8 @@ class AgentChargePlanApp(ZApplication):
             group_id=self.group_id,
         )
         #: 读到的特训目标清单
-        self.snapshot: AgentPlanSnapshot | None = None
+        self.snapshot_list: list[AgentPlanSnapshot] = []
+        """读到的特训目标清单。批量模式下每个角色一份"""
         #: 读到的材料缺口
         self.material_gap: MaterialGapSnapshot | None = None
         #: 当前剩余电量
@@ -111,14 +113,42 @@ class AgentChargePlanApp(ZApplication):
     def start(self) -> OperationRoundResult:
         """先看配置，决定后面走哪条路。"""
         log.info(
-            '特训目标体力计划开始：目标模式 %s，预览模式 %s，指定代理人「%s」',
+            '特训目标体力计划开始：目标模式 %s，预览模式 %s，指定代理人「%s」，批量 %d 个，扫描模式 %s',
             self.config.goal_mode,
             self.config.dry_run,
             self.config.target_agent_name or '按游戏当前设置',
+            len(self.config.batch_agent_names),
+            self.config.scan_only,
         )
+        if self.config.scan_only:
+            return self.round_success('扫描代理人名单')
         if self.config.goal_mode == GOAL_MODE_MATERIAL_FLOOR:
             return self.round_success('只处理材料库存')
         return self.round_success('读取特训目标')
+
+    @node_from(from_name='开始', status='扫描代理人名单')
+    @operation_node(name='扫描代理人名单', node_max_retry_times=2)
+    def scan_agents(self) -> OperationRoundResult:
+        """把游戏里「更换特训目标」弹窗的全部代理人名字扫出来，写进配置。
+
+        只读不点，也不会动当前的特训目标；扫完把名单存进 `known_agent_list`，
+        之后在 Web 配置页勾选要养的角色。
+        """
+        op = ScanAgentList(self.ctx, goto_first=True)
+        result = op.execute()
+        if not result.success:
+            return self.round_by_op_result(result)
+
+        data = op.data
+        if not isinstance(data, AgentNameList):
+            return self.round_fail('扫描没有返回名单')
+        for warning in data.warnings:
+            log.warning(warning)
+
+        name_list = list(data.name_list)
+        self.config.known_agent_list = name_list
+        log.info('扫到 %d 个代理人：%s', len(name_list), '、'.join(name_list))
+        return self.round_success(f'扫到 {len(name_list)} 个代理人')
 
     @node_from(from_name='开始', status='读取特训目标')
     @operation_node(name='前往特训目标页', node_max_retry_times=3)
@@ -147,9 +177,20 @@ class AgentChargePlanApp(ZApplication):
 
     @node_from(from_name='对齐特训目标')
     @node_from(from_name='对齐特训目标', status='沿用游戏当前目标')
-    @operation_node(name='读取清单', node_max_retry_times=2)
+    @operation_node(name='读取清单', node_max_retry_times=1)
     def read_plan_list(self) -> OperationRoundResult:
-        """读特训目标页的条目：分组、条目名、电量、进度。"""
+        """读特训目标页的条目：分组、条目名、电量、进度。
+
+        批量名单（`batch_agent_names`）非空时逐个切过去读一遍，读完把特训目标恢复成
+        进来时的那个。游戏只能设一个特训目标，所以这是唯一的批量办法。
+        """
+        batch = self.config.batch_agent_names
+        if not batch:
+            return self._read_one_agent()
+        return self._read_batch_agents(batch)
+
+    def _read_one_agent(self) -> OperationRoundResult:
+        """读当前特训目标这一个角色的清单。"""
         op = ReadAgentPlanList(self.ctx, goto_first=False)
         result = op.execute()
         if not result.success:
@@ -158,14 +199,63 @@ class AgentChargePlanApp(ZApplication):
         snapshot = op.data
         if not isinstance(snapshot, AgentPlanSnapshot):
             return self.round_fail('清单读取没有返回数据')
-        self.snapshot = snapshot
+        self.snapshot_list = [snapshot]
+        self._log_snapshot(snapshot)
+        return self.round_success()
+
+    def _read_batch_agents(self, batch: list[str]) -> OperationRoundResult:
+        """逐个切换特训目标并读清单，读完恢复原目标。"""
+        original_name = read_agent_name(self.ctx, self.last_screenshot)
+        log.info('批量模式：要读 %d 个角色，当前特训目标是「%s」', len(batch), original_name or '读不到')
+
+        self.snapshot_list = []
+        failed_name_list: list[str] = []
+        for idx, name in enumerate(batch, start=1):
+            log.info('批量读清单 %d/%d：%s', idx, len(batch), name)
+
+            change_op = ChangeAgentPlanTarget(self.ctx, target_agent_name=name, goto_first=False)
+            change_result = change_op.execute()
+            if not change_result.success:
+                log.warning('切到「%s」失败：%s', name, change_result.status)
+                failed_name_list.append(name)
+                continue
+
+            read_op = ReadAgentPlanList(self.ctx, goto_first=False)
+            read_result = read_op.execute()
+            if not read_result.success or not isinstance(read_op.data, AgentPlanSnapshot):
+                log.warning('读「%s」的清单失败：%s', name, read_result.status)
+                failed_name_list.append(name)
+                continue
+
+            self.snapshot_list.append(read_op.data)
+            self._log_snapshot(read_op.data)
+
+        # 无论成功几个，都把特训目标恢复成进来时的那个，别把用户的设置改坏
+        if original_name:
+            restore_op = ChangeAgentPlanTarget(
+                self.ctx, target_agent_name=original_name, goto_first=False
+            )
+            if restore_op.execute().success:
+                log.info('特训目标已恢复为「%s」', original_name)
+            else:
+                log.warning('特训目标没能恢复成「%s」，你需要在游戏里手动改回来', original_name)
+
+        if failed_name_list:
+            log.warning('这些角色没读到：%s', '、'.join(failed_name_list))
+        if not self.snapshot_list:
+            return self.round_fail('批量读取一个角色都没成功')
+        return self.round_success(
+            f'读到 {len(self.snapshot_list)}/{len(batch)} 个角色'
+        )
+
+    def _log_snapshot(self, snapshot: AgentPlanSnapshot) -> None:
+        """把一份清单打进日志。"""
         log.info('特训目标：%s，条目 %s 个', snapshot.agent_name, len(snapshot.item_list))
         for item in snapshot.item_list:
             log.info(
                 '  %s / %s / 电量 %s / 进度 %s',
                 item.group_name, item.name, item.charge_text, item.progress_text,
             )
-        return self.round_success()
 
     @node_from(from_name='读取清单')
     @node_from(from_name='开始', status='只处理材料库存')
@@ -237,7 +327,7 @@ class AgentChargePlanApp(ZApplication):
     def build_and_write(self) -> OperationRoundResult:
         """清单 → 计划项 → 写进内置体力计划配置。"""
         is_agent_stage = self.config.goal_mode in (GOAL_MODE_AGENT_STAGE, GOAL_MODE_BOTH)
-        if is_agent_stage and self.snapshot is None:
+        if is_agent_stage and not self.snapshot_list:
             return self.round_fail('还没读到特训目标清单')
         if not is_agent_stage and self.material_gap is None:
             return self.round_fail('材料缺口也没读到，没有可排的东西')
@@ -253,7 +343,12 @@ class AgentChargePlanApp(ZApplication):
             default_plan_times=self.config.default_plan_times,
             include_drive_disc=self.config.include_drive_disc,
         )
-        snapshot = PlanSnapshot.from_reader_snapshot(self.snapshot) if self.snapshot is not None else PlanSnapshot()
+        # 批量模式下会有多份清单，全部摊平交给映射层；同一个副本会被内容键去重
+        snapshot = PlanSnapshot()
+        for one in self.snapshot_list:
+            snapshot.entries.extend(PlanSnapshot.from_reader_snapshot(one).entries)
+        if len(self.snapshot_list) > 1:
+            log.info('合并 %d 个角色的清单，共 %d 条原始条目', len(self.snapshot_list), len(snapshot.entries))
 
         # 材料库存目标：有配置就按缺口算出次数，和角色养成的条目合并后一起过电量预算
         material_snapshot = self._build_material_snapshot()
@@ -300,6 +395,8 @@ class AgentChargePlanApp(ZApplication):
 
     @node_from(from_name='生成并写入计划')
     @node_from(from_name='生成并写入计划', success=False)
+    @node_from(from_name='扫描代理人名单')
+    @node_from(from_name='扫描代理人名单', success=False)
     @node_notify(when=NotifyTiming.CURRENT_DONE, detail=True)
     @operation_node(name='返回大世界')
     def back_to_world(self) -> OperationRoundResult:
