@@ -179,7 +179,20 @@ class DialogAgent:
 # ============================= OCR =============================
 
 
-def read_text_blocks(ctx: ZContext, screen: MatLike, area: Rect) -> list[TextBlock]:
+#: 白色文字的 BGR 范围（项目里 color_range 走 cv2.inRange，通道顺序是 BGR）。
+#:
+#: ⚠️ 实机对比过：拿它过滤代理人弹窗反而更差——颜色过滤会抹掉文字的抗锯齿边缘，
+#: OCR 识别率明显下降（留档截图：不过滤读到 9 个全对，170~200 各档只读到 6~12 个且有错字）。
+#: 保留这个常量是给「灰底浅色文字」这类场景备用，读代理人名字不要用它。
+WHITE_TEXT_COLOR_RANGE: list[list[int]] = [[170, 170, 170], [255, 255, 255]]
+
+
+def read_text_blocks(
+    ctx: ZContext,
+    screen: MatLike,
+    area: Rect,
+    color_range: list[list[int]] | None = None,
+) -> list[TextBlock]:
     """把一个区域里的文字全部 OCR 出来，坐标换算成整张截图上的坐标。
 
     Args:
@@ -190,6 +203,21 @@ def read_text_blocks(ctx: ZContext, screen: MatLike, area: Rect) -> list[TextBlo
     Returns:
         文字块列表，未排序
     """
+    if color_range is not None:
+        # 先按颜色过滤再 OCR：只保留符合范围的像素，杂色文字直接不会进识别
+        result_list = ctx.ocr_service.get_ocr_result_list(
+            screen, color_range=color_range, rect=area, crop_first=True
+        )
+        block_list_with_color: list[TextBlock] = []
+        for item in result_list:
+            if not item.data:
+                continue
+            rect = item.rect
+            # crop_first=True 时识别的是裁剪图，坐标要加回区域左上角
+            rect.add_offset(area.left_top)
+            block_list_with_color.append(TextBlock(text=item.data, rect=rect))
+        return block_list_with_color
+
     result_map = ctx.ocr.crop_and_run_ocr(screen, area)
     block_list: list[TextBlock] = []
     for text, match_result_list in result_map.items():

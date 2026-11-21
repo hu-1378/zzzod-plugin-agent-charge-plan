@@ -90,6 +90,10 @@ class StubContext:
             if screen_loader is not None
             else PluginScreenLoader(PLUGIN_ROOT / 'screen_info')
         )
+        from one_dragon.base.matcher.ocr.ocr_service import OcrService
+
+        self.ocr_service = OcrService(ocr)
+        """带颜色过滤和缓存的 OCR 服务，读弹窗名字时会用"""
         self.compendium_service: CompendiumService | None = compendium_service
 
 
