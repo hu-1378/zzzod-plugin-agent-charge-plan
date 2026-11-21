@@ -129,6 +129,41 @@ class AgentNameList:
         return lines
 
 
+def read_dialog_agents(
+    ctx: ZContext, screen: MatLike, area: Rect
+) -> tuple[list[agent_plan_page.DialogAgent], str]:
+    """读一屏代理人弹窗，返回带名字框的代理人（顺序 = 网格阅读顺序）。
+
+    和 `read_dialog_screen` 的区别是保留名字框位置，调用方可以算「第几行第几列」，
+    用于把跨屏合并后的名单按位置重排。
+
+    Args:
+        ctx: 一条龙上下文
+        screen: 游戏截图
+        area: 代理人网格区域
+
+    Returns:
+        (代理人列表, 这一屏的文字指纹)
+    """
+    block_list = agent_plan_page.read_text_blocks(ctx, screen, area)
+    agent_list = agent_plan_page.read_names_by_level_anchor(ctx, screen, block_list)
+    existing = {agent.name for agent in agent_list}
+    for agent in agent_plan_page.parse_dialog_agents_by_grid(block_list, area):
+        if agent.name not in existing:
+            agent_list.append(agent)
+            existing.add(agent.name)
+
+    def _cell_order(agent: agent_plan_page.DialogAgent) -> tuple[int, int]:
+        cell = agent_plan_page.dialog_grid_cell(
+            agent_plan_page.TextBlock(text=agent.name, rect=agent.name_rect), area
+        )
+        return cell if cell is not None else (99, 99)
+
+    agent_list.sort(key=_cell_order)
+    fingerprint = '|'.join(sorted(block.text for block in block_list))
+    return agent_list, fingerprint
+
+
 def read_dialog_screen(
     ctx: ZContext, screen: MatLike, area: Rect
 ) -> tuple[list[str], str]:
@@ -237,6 +272,9 @@ class ScanAgentList(ZOperation):
         self.name_list: list[str] = []
         """累计扫到的代理人名字，按屏幕上第一次出现的顺序"""
 
+        self.name_position: dict[str, tuple[int, int]] = {}
+        """名字 -> 首次出现的（绝对行, 列）。收尾时按它排序，避免跨屏合并后乱序"""
+
         self.warnings: list[str] = []
         """降级提示"""
 
@@ -250,7 +288,6 @@ class ScanAgentList(ZOperation):
         """连续几次滚动后画面一个字都没变（拖拽没生效的迹象）"""
 
         self.last_fingerprint: str = ''
-        """上一屏的文字指纹，用来识别「拖拽没生效」"""
 
         self.fail_status: str = ''
         """读名字阶段发现的问题。收尾节点用它决定这次操作是成是败"""
@@ -258,6 +295,7 @@ class ScanAgentList(ZOperation):
     def handle_init(self) -> None:
         """每次执行前把上一次跑留下的中间状态清干净，免得同实例复用时名单串味。"""
         self.name_list = []
+        self.name_position = {}
         self.warnings = []
         self.scroll_times = 0
         self.no_new_times = 0
@@ -345,9 +383,18 @@ class ScanAgentList(ZOperation):
             self.fail_status = f'{CHANGE_TARGET_SCREEN}.{AREA_AGENT_GRID} 区域没配置，读不了代理人名字'
             return self.round_success(status=STATUS_NAMES_EMPTY)
 
-        screen_name_list, fingerprint = read_dialog_screen(
-            self.ctx, self.last_screenshot, area
-        )
+        agent_list, fingerprint = read_dialog_agents(self.ctx, self.last_screenshot, area)
+        screen_name_list = [agent.name for agent in agent_list]
+        # 记下每个名字首次出现的绝对位置（滚一行 = 前进一行，所以屏号-1 + 行号）
+        for agent in agent_list:
+            cell = agent_plan_page.dialog_grid_cell(
+                agent_plan_page.TextBlock(text=agent.name, rect=agent.name_rect), area
+            )
+            if cell is None:
+                continue
+            abs_row = (self.scroll_times) + cell[0]
+            if agent.name not in self.name_position:
+                self.name_position[agent.name] = (abs_row, cell[1])
         # 留一张图，事后排查「这一屏到底读到了什么」用。走主仓的 save_screenshot，
         # 会自动给 UID 打码并落到 .debug/images/
         log.info(
@@ -405,6 +452,11 @@ class ScanAgentList(ZOperation):
         Returns:
             读到名字就成功（data 是 `AgentNameList`），一个都没读到就失败
         """
+        # 按位置重排：跨屏合并时新名字是追加到末尾的，同一行被拆到两屏就会乱
+        self.name_list.sort(
+            key=lambda one: self.name_position.get(one, (999, 999))
+        )
+
         # 表里查不到的名字原样保留（可能是新版本角色），只记一笔方便排查
         unknown = [
             one for one in self.name_list

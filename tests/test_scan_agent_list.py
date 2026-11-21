@@ -195,6 +195,7 @@ def _bare_operation(ctx: Any = None) -> Any:
     op.no_new_times = 0
     op.same_screen_times = 0
     op.last_fingerprint = ''
+    op.name_position = {}
     op.fail_status = ''
     op.ctx = ctx if ctx is not None else object()
     op.last_screenshot = None
@@ -267,7 +268,16 @@ def test_read_names_scrolls_until_two_empty_screens(
         (['琉音'], 'C'),
         (['琉音'], 'D'),
     ]
-    monkeypatch.setattr(sas, 'read_dialog_screen', lambda ctx, screen, area: screens.pop(0))
+
+    def _fake_agents(ctx: Any, screen: Any, area: Any) -> Any:
+        names, fingerprint = screens.pop(0)
+        agents = [
+            sas.agent_plan_page.DialogAgent(name=one, name_rect=Rect(0, 0, 10, 10))
+            for one in names
+        ]
+        return agents, fingerprint
+
+    monkeypatch.setattr(sas, 'read_dialog_agents', _fake_agents)
 
     result_list: list[Any] = []
     for _ in range(10):
@@ -296,7 +306,12 @@ def test_read_names_warns_when_screen_never_moves(
     op = _bare_operation(plugin_ctx)
     op._drag_grid = lambda area, downward: None
     monkeypatch.setattr(
-        sas, 'read_dialog_screen', lambda ctx, screen, area: (['叶瞬光'], 'A')
+        sas,
+        'read_dialog_agents',
+        lambda ctx, screen, area: (
+            [sas.agent_plan_page.DialogAgent(name='叶瞬光', name_rect=Rect(0, 0, 10, 10))],
+            'A',
+        ),
     )
 
     result_list: list[Any] = []
@@ -320,7 +335,12 @@ def test_read_names_stops_at_max_scroll(
     op.scroll_times = sas.MAX_SCROLL_TIMES
     op._drag_grid = lambda area, downward: None
     monkeypatch.setattr(
-        sas, 'read_dialog_screen', lambda ctx, screen, area: (['叶瞬光'], 'A')
+        sas,
+        'read_dialog_agents',
+        lambda ctx, screen, area: (
+            [sas.agent_plan_page.DialogAgent(name='叶瞬光', name_rect=Rect(0, 0, 10, 10))],
+            'A',
+        ),
     )
 
     result = op.read_names()
