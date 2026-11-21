@@ -85,9 +85,11 @@ SCROLL_WAIT: float = 1.2
 CLOSE_WAIT: float = 1.0
 #: 回顶部时每次拖完等一下画面（秒）
 SCROLL_SETTLE: float = 0.3
-#: 竖向拖拽的起止比例（相对网格高度）。0.86 -> 0.14 相当于一次滚 72% 高度
-SCROLL_START_RATIO: float = 0.86
-SCROLL_END_RATIO: float = 0.14
+#: 竖向拖拽的起止比例（相对网格高度）。0.75 -> 0.25 相当于一次滚 50% 高度，也就是一行。
+#: 只滚一行是为了「重叠」：最下面那行会被滚动条和按钮挡住一半（实测「照」被读成「日」），
+#: 滚一屏后同一行会移到中间位置，能被完整读到一次。
+SCROLL_START_RATIO: float = 0.75
+SCROLL_END_RATIO: float = 0.25
 #: 拖拽全程耗时。原来用默认 0.5 秒拖 320px，游戏多半当成了点击，压根没滚
 SCROLL_DRAG_SECONDS: float = 0.9
 
