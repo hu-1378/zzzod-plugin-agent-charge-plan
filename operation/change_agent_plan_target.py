@@ -106,9 +106,13 @@ class ChangeAgentPlanTarget(ZOperation):
         """弹窗里已经往下滚了几次"""
 
         self.clicked_agent_name: str = ''
+        """这次点过的代理人名字，用来在确认时核对"""
+
         self.backed_to_top: bool = False
         """这次弹窗是不是已经滚回顶部了（每个角色只滚一次）"""
-        """这次点过的代理人名字，用来在确认时核对"""
+
+        self.set_target_wait_times: int = 0
+        """点完格子后已经等了几轮按钮切换（等下让底部按钮从「清除目标」变成「设置为目标」）"""
 
     @operation_node(name='读取当前目标', is_start_node=True, node_max_retry_times=3)
     def read_current_target(self) -> OperationRoundResult:
