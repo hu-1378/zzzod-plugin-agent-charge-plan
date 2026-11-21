@@ -358,10 +358,16 @@ class AgentChargePlanApp(ZApplication):
             default_plan_times=self.config.default_plan_times,
             include_drive_disc=self.config.include_drive_disc,
         )
-        # 批量模式下会有多份清单，全部摊平交给映射层；同一个副本会被内容键去重
+        # 批量模式下会有多份清单，全部摊平交给映射层；同一个副本会被内容键去重。
+        # 角色名必须一起带过去：映射层要靠它查代理人属性（「代理人技能」得按属性选副本）。
         snapshot = PlanSnapshot()
         for one in self.snapshot_list:
-            snapshot.entries.extend(PlanSnapshot.from_reader_snapshot(one).entries)
+            converted = PlanSnapshot.from_reader_snapshot(one)
+            snapshot.entries.extend(converted.entries)
+            if not snapshot.agent_name and converted.agent_name:
+                snapshot.agent_name = converted.agent_name
+            if not snapshot.element and converted.element:
+                snapshot.element = converted.element
         if len(self.snapshot_list) > 1:
             log.info('合并 %d 个角色的清单，共 %d 条原始条目', len(self.snapshot_list), len(snapshot.entries))
 
