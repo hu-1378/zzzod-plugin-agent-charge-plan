@@ -229,6 +229,26 @@ def read_text_blocks(
     return block_list
 
 
+def is_confirm_replace_dialog(ctx: ZContext, screen: MatLike) -> bool:
+    """「已将 xxx 设置为特训目标，是否替换？」这个确认框是不是开着。
+
+    Args:
+        ctx: 一条龙上下文
+        screen: 游戏截图
+
+    Returns:
+        开着就返回 True
+    """
+    try:
+        area = screen_areas.get_area_rect(
+            ctx, screen_areas.CONFIRM_REPLACE_SCREEN, screen_areas.AREA_CONFIRM_TITLE
+        )
+    except LookupError:
+        return False
+    block_list = read_text_blocks(ctx, screen, area)
+    return any('替换' in block.text for block in block_list)
+
+
 def read_agent_name(ctx: ZContext, screen: MatLike) -> str:
     """读顶部角色卡上的代理人名字。读不到返回空字符串。
 

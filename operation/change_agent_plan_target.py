@@ -34,6 +34,12 @@ AREA_DIALOG_TITLE: str = '标题-更换特训目标'
 AREA_AGENT_GRID: str = '区域-代理人网格'
 #: 弹窗底部的「清除目标」
 AREA_CLEAR_BUTTON: str = '按钮-清除目标'
+#: 选中代理人后，底部右侧「清除目标」会变成「设置为目标」
+AREA_SET_TARGET_BUTTON: str = '按钮-设置为目标'
+#: 点「设置为目标」之后弹出的确认框画面
+CONFIRM_REPLACE_SCREEN: str = '特训目标-确认替换'
+#: 确认框里的「确认」按钮
+AREA_CONFIRM_OK_BUTTON: str = '按钮-确认'
 #: 弹窗右上角的关闭
 AREA_CLOSE_BUTTON: str = '按钮-关闭'
 
@@ -191,6 +197,34 @@ class ChangeAgentPlanTarget(ZOperation):
         return self.round_wait(status=f'点击 {agent.name}', wait=CLICK_WAIT)
 
     @node_from(from_name='找并点击代理人')
+    @operation_node(name='点设置为目标', node_max_retry_times=5)
+    def click_set_target(self) -> OperationRoundResult:
+        """选中代理人后，点底部右侧的「设置为目标」。
+
+        这一步不能省：点完格子只是「选中」，底部按钮会从「清除目标」变成「设置为目标」，
+        不点它的话特训目标根本没换。
+        """
+        if not self._is_dialog_open():
+            # 有的情况点格子直接生效、弹窗自己关了
+            return self.round_success(status='弹窗已关闭，按已生效处理')
+        return self.round_by_find_and_click_area(
+            self.last_screenshot, CHANGE_TARGET_SCREEN, AREA_SET_TARGET_BUTTON,
+            success_wait=CLICK_WAIT, retry_wait=1,
+        )
+
+    @node_from(from_name='点设置为目标')
+    @operation_node(name='点确认替换', node_max_retry_times=5)
+    def click_confirm_replace(self) -> OperationRoundResult:
+        """确认框「已将 xxx 设置为特训目标，是否替换？」里点「确认」。"""
+        if not agent_plan_page.is_confirm_replace_dialog(self.ctx, self.last_screenshot):
+            # 确认框没出来（已经生效或直接关了），交给下一步核对
+            return self.round_success(status='没有确认框，按已生效处理')
+        return self.round_by_find_and_click_area(
+            self.last_screenshot, CONFIRM_REPLACE_SCREEN, AREA_CONFIRM_OK_BUTTON,
+            success_wait=CLICK_WAIT, retry_wait=1,
+        )
+
+    @node_from(from_name='点确认替换')
     @operation_node(name='确认切换结果', node_max_retry_times=5)
     def confirm_change(self) -> OperationRoundResult:
         """弹窗关上后，核对页面上的特训目标确实换成了目标代理人。"""
