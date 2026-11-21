@@ -172,7 +172,9 @@ class PlanSnapshot:
                     charge_text=_as_text(_get_first(raw, 'charge_text', 'charge')),
                     progress_text=_as_text_or_none(_get_first(raw, 'progress_text', 'progress')),
                     amount_per_run=_as_int(_get_first(raw, 'amount_per_run', 'per_run_amount')),
-                    element=_as_text_or_none(_get_first(raw, 'element', 'dmg_type')),
+                    element=_as_text_or_none(
+                        _get_first(raw, 'element', 'icon_element', 'dmg_type')
+                    ),
                 )
             )
 

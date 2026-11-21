@@ -23,10 +23,13 @@ from cv2.typing import MatLike
 from one_dragon.base.geometry.point import Point
 from one_dragon.base.geometry.rectangle import Rect
 from one_dragon.utils import str_utils
+from one_dragon.utils.log_utils import log
 
 from . import screen_areas
 
 if TYPE_CHECKING:
+    from numpy import ndarray
+
     from zzz_od.context.zzz_context import ZContext
 
 
@@ -137,6 +140,9 @@ class AgentPlanItem:
     center: Point = field(default_factory=lambda: Point(0, 0))
     #: 「前往」按钮的中心点。这一条被裁掉一半、按钮没识别到时是 None
     go_button_center: Point | None = None
+    #: 从「代理人技能」左侧芯片图标的颜色判出来的属性（电属性 / 物理属性 …）。
+    #: 只有那一条会去取色，其他条目恒为 None；取不到或认不出也是 None
+    icon_element: str | None = None
 
     @property
     def is_finished(self) -> bool:
@@ -291,6 +297,29 @@ def _is_real_plan_item(item: AgentPlanItem) -> bool:
     if item.charge_text:
         return True
     return len(item.name.strip()) >= 3
+
+
+def fill_icon_element(screen: ndarray, item_list: list[AgentPlanItem]) -> None:
+    """给「按属性分副本」的条目补上图标属性。
+
+    只有「代理人技能」这一条需要：它的图标颜色代表属性。其他条目左边的图标是材料图标，
+    颜色代表稀有度，取色会误判（实测把经验书判成了火属性）。
+
+    Args:
+        screen: 整屏截图（BGR）
+        item_list: 解析出来的条目，原地写 `icon_element`
+    """
+    from . import chip_element
+
+    for item in item_list:
+        if not chip_element.is_element_entry(item.name):
+            continue
+        element, detail = chip_element.read_chip_element(
+            screen, (item.center.x, item.center.y)
+        )
+        if detail:
+            log.info('芯片图标取色：%s -> %s（%s）', item.name, element, detail)
+        item.icon_element = element
 
 
 def classify_text_block(block: TextBlock, area: Rect) -> str:

@@ -117,6 +117,7 @@ class ReadAgentPlanList(ZOperation):
         area: Rect = self._plan_list_rect()
         block_list = agent_plan_page.read_text_blocks(self.ctx, self.last_screenshot, area)
         screen_item_list = agent_plan_page.parse_plan_items(block_list, area)
+        agent_plan_page.fill_icon_element(self.last_screenshot, screen_item_list)
         self.item_list, new_count = agent_plan_page.merge_item_list(
             self.item_list, screen_item_list
         )
