@@ -52,7 +52,11 @@ CLICK_WAIT: float = 1.2
 #: 点确认框之前先等几轮（弹窗有弹出动画）
 CONFIRM_WAIT_TIMES: int = 2
 #: 弹窗里滚动后等界面停稳的时间（秒）
-SCROLL_DIALOG_WAIT: float = 0.8
+SCROLL_DIALOG_WAIT: float = 1.2
+#: 弹窗网格滚动：起止比例和耗时。原来用 drag_to 默认 0.5 秒，实测偏快
+DIALOG_SCROLL_START_RATIO: float = 0.80
+DIALOG_SCROLL_END_RATIO: float = 0.20
+DIALOG_SCROLL_SECONDS: float = 1.0
 
 #: 节点返回的状态：要清除目标
 STATUS_NEED_CLEAR: str = '需要清除目标'
@@ -244,7 +248,8 @@ class ChangeAgentPlanTarget(ZOperation):
 
         log.info('没按文字认到「设置为目标」，直接点区域中心 %s', rect.center)
         self.ctx.controller.click(rect.center)
-        return self.round_wait(status='盲点「设置为目标」', wait=CLICK_WAIT)
+        # 多等一会：确认框有弹出动画，等它出来再进下一步
+        return self.round_wait(status='盲点「设置为目标」', wait=CLICK_WAIT + 0.6)
 
     @node_from(from_name='点设置为目标')
     @operation_node(name='点确认替换', node_max_retry_times=6)
@@ -255,11 +260,6 @@ class ChangeAgentPlanTarget(ZOperation):
         等不到才当成「这次操作不需要确认」，并且打一条 warning —— 宁可多等一秒，
         也不要因为一次误判把「切目标没成功」当成成功。
         """
-        # 确认框有弹出动画：先等它出来（最多两轮），免得点到别的按钮上
-        if self.node_retry_times < CONFIRM_WAIT_TIMES \
-                and not agent_plan_page.is_confirm_replace_dialog(self.ctx, self.last_screenshot):
-            return self.round_retry(status='等确认框出现', wait=1)
-
         result = self.round_by_find_and_click_area(
             self.last_screenshot, CONFIRM_REPLACE_SCREEN, AREA_CONFIRM_OK_BUTTON,
             success_wait=CLICK_WAIT, retry_wait=1,
@@ -354,13 +354,20 @@ class ChangeAgentPlanTarget(ZOperation):
     def _drag_dialog(self, area: Rect) -> None:
         """在弹窗网格里往下滚一屏。
 
+        走 screen_areas.scroll_rect：用比例 + 时长控制。原来直接 drag_to 用默认
+        0.5 秒拖 300 多像素，实测游戏多半当成点击，滚不动或者一下滚过头。
+
         Args:
             area: 代理人网格区域
         """
-        x: int = area.center.x
-        start = Point(x, area.y2 - DIALOG_SCROLL_MARGIN)
-        end = Point(x, area.y1 + DIALOG_SCROLL_MARGIN)
-        self.ctx.controller.drag_to(start=start, end=end)
+        screen_areas.scroll_rect(
+            self.ctx,
+            area,
+            direction='down',
+            start_ratio=DIALOG_SCROLL_START_RATIO,
+            end_ratio=DIALOG_SCROLL_END_RATIO,
+            duration=DIALOG_SCROLL_SECONDS,
+        )
 
     def _close_dialog(self) -> None:
         """点弹窗右上角的关闭，避免停在弹窗上出不去。"""
