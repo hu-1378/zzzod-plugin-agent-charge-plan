@@ -150,12 +150,27 @@ def read_dialog_screen(
         (这一屏读到的名字, 文字指纹)。名字可能带同一格在滚动边界上重复读出来的条目
     """
     block_list = agent_plan_page.read_text_blocks(ctx, screen, area)
-    agent_list = agent_plan_page.parse_dialog_agents_by_grid(block_list, area)
-    # 整屏 OCR 偶尔整个格子都没检测到（实测「柳」），按固定布局裁出来补读一遍
-    missing = agent_plan_page.read_missing_cell_names(ctx, screen, area, block_list)
-    if missing:
-        existing = {agent.name for agent in agent_list}
-        agent_list.extend(agent for agent in missing if agent.name not in existing)
+    # 两路一起用：
+    # ① 按 Lv. 反推名字位置再单独识别——准（实测一屏 12 个全对），
+    #    但依赖 Lv. 被检测到，某几行的 Lv. 没读出来就会漏
+    # ② 按 6x2 格子归组——覆盖全，但背景大字碎片会混进格子（靠「表内优先」挡掉）
+    # 先放 ①，再用 ② 补 ① 没覆盖到的名字
+    agent_list = agent_plan_page.read_names_by_level_anchor(ctx, screen, block_list)
+    existing = {agent.name for agent in agent_list}
+    for agent in agent_plan_page.parse_dialog_agents_by_grid(block_list, area):
+        if agent.name not in existing:
+            agent_list.append(agent)
+            existing.add(agent.name)
+
+    # 两路各自的顺序不同（Lv 反推按 y 坐标排，同一行有 ±1px 抖动），
+    # 合并后按格子行列重排一次，保证顺序稳定、便于比对
+    def _cell_order(agent: agent_plan_page.DialogAgent) -> tuple[int, int]:
+        cell = agent_plan_page.dialog_grid_cell(
+            agent_plan_page.TextBlock(text=agent.name, rect=agent.name_rect), area
+        )
+        return cell if cell is not None else (99, 99)
+
+    agent_list.sort(key=_cell_order)
     name_list: list[str] = []
     for agent in agent_list:
         name = agent.name

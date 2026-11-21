@@ -767,6 +767,71 @@ def read_missing_cell_names(
     return found
 
 
+#: 名字区域相对 Lv. 文本的位置：同宽、左右各扩 6px、往上 34px
+LEVEL_NAME_PAD_X: int = 6
+LEVEL_NAME_ABOVE: int = 34
+#: 按 Lv. 反推裁出来的名字要放大多少倍再识别
+LEVEL_NAME_ZOOM: float = 3.0
+
+
+def read_names_by_level_anchor(
+    ctx: ZContext, screen: MatLike, block_list: list[TextBlock],
+) -> list[DialogAgent]:
+    """用「Lv.60」这类文本反推名字位置，再单独裁出来识别。
+
+    ## 为什么这么做
+
+    格子里的名字只有 20~30px 高，整屏 OCR 直接读容易出问题：
+    - 名字被切成一半（「照」读成「昭」）
+    - 整个名字没检测到（「柳」那格只读到 Lv.60）
+    - 背景上「特训方案 / 清除目标」这些半透明大字被压暗后读出碎片，
+      和真名字落在同一格（「雅」旁边多个「好」）
+
+    但每格的 `Lv.XX` 都能稳定读到。名字就在它正上方 34px 左右、宽度基本对齐，
+    按这个位置裁出来放大 3 倍单独识别，实测一屏 12 个全对。
+
+    Args:
+        ctx: 一条龙上下文
+        screen: 整屏截图
+        block_list: 网格区的文本块（用来找 Lv.）
+
+    Returns:
+        代理人列表，按 Lv. 的阅读顺序
+    """
+    import cv2
+
+    agent_list: list[DialogAgent] = []
+    seen: set[str] = set()
+    for block in sorted(block_list, key=lambda item: (item.rect.center.y, item.rect.x1)):
+        if not _LEVEL_PATTERN.match(_normalize_text(block.text)):
+            continue
+
+        level_rect = block.rect
+        x1 = max(0, int(level_rect.x1) - LEVEL_NAME_PAD_X)
+        y1 = max(0, int(level_rect.y1) - LEVEL_NAME_ABOVE)
+        x2 = int(level_rect.x2) + LEVEL_NAME_PAD_X
+        y2 = int(level_rect.y1) + 1
+        if x2 <= x1 or y2 <= y1:
+            continue
+
+        crop = screen[y1:y2, x1:x2]
+        if crop.size == 0:
+            continue
+        zoomed = cv2.resize(
+            crop, None, fx=LEVEL_NAME_ZOOM, fy=LEVEL_NAME_ZOOM,
+            interpolation=cv2.INTER_CUBIC,
+        )
+        text = _normalize_text(ctx.ocr.run_ocr_single_line(zoomed))
+        if not text or _LEVEL_PATTERN.match(text) or _DIGIT_ONLY_PATTERN.match(text):
+            continue
+        if text in seen:
+            continue
+        seen.add(text)
+        agent_list.append(DialogAgent(name=text, name_rect=Rect(x1, y1, x2, y2)))
+
+    return agent_list
+
+
 def find_dialog_agent(block_list: list[TextBlock],
                       target_name: str) -> DialogAgent | None:
     """在网格里找目标代理人。
