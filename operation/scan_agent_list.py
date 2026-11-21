@@ -151,6 +151,11 @@ def read_dialog_screen(
     """
     block_list = agent_plan_page.read_text_blocks(ctx, screen, area)
     agent_list = agent_plan_page.parse_dialog_agents_by_grid(block_list, area)
+    # 整屏 OCR 偶尔整个格子都没检测到（实测「柳」），按固定布局裁出来补读一遍
+    missing = agent_plan_page.read_missing_cell_names(ctx, screen, area, block_list)
+    if missing:
+        existing = {agent.name for agent in agent_list}
+        agent_list.extend(agent for agent in missing if agent.name not in existing)
     name_list: list[str] = []
     for agent in agent_list:
         name = agent.name

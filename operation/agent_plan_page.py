@@ -24,6 +24,7 @@ from one_dragon.base.geometry.point import Point
 from one_dragon.base.geometry.rectangle import Rect
 from one_dragon.utils import str_utils
 from one_dragon.utils.log_utils import log
+from zzz_od.game_data.agent import AgentEnum
 
 from . import screen_areas
 
@@ -500,6 +501,11 @@ def _fill_item(target: AgentPlanItem, source: AgentPlanItem) -> None:
 DIALOG_GRID_COLUMNS: int = 6
 DIALOG_GRID_ROWS: int = 2
 
+#: 项目代理人表里的全部名字，用来校验补读到的东西靠不靠谱
+_KNOWN_AGENT_NAMES: frozenset[str] = frozenset(
+    member.value.agent_name for member in AgentEnum
+)
+
 
 def dialog_grid_cell(block: TextBlock, area: Rect) -> tuple[int, int] | None:
     """文本块落在第几行第几列的格子里。
@@ -646,6 +652,93 @@ def refine_dialog_name(ctx: ZContext, screen: MatLike, agent: DialogAgent) -> st
     if _LEVEL_PATTERN.match(text) or _DIGIT_ONLY_PATTERN.match(text):
         return agent.name
     return text
+
+
+#: 补读空格子时，名字区域在格子里的相对位置（左、上、右、下，0~1）。
+#: 实测格子布局：头像占上半，名字在格子的 61%~72% 处（下面还有一行 Lv.60），左右各留 8% 边
+CELL_NAME_RATIO: tuple[float, float, float, float] = (0.08, 0.56, 0.92, 0.76)
+#: 补读时的放大倍率。格子里的字本来就小，放 3 倍再识别
+MISSING_NAME_ZOOM: float = 3.0
+
+
+def read_missing_cell_names(
+    ctx: ZContext,
+    screen: MatLike,
+    area: Rect,
+    block_list: list[TextBlock] | None = None,
+) -> list[DialogAgent]:
+    """把网格里「没读到名字」的格子单独裁出来放大重识别。
+
+    整屏 OCR 偶尔会漏掉某些格子（实测「柳」那一格只检测到 `Lv.60`，名字整个没出现）。
+    格子布局是固定的 6x2，所以可以直接按位置裁出名字区域重识别，补回漏掉的。
+
+    Args:
+        ctx: 一条龙上下文
+        screen: 整屏截图
+        area: 代理人网格区域
+        block_list: 已经识别过的文本块；不传就自己再识别一次
+
+    Returns:
+        补读到的代理人列表（只包含原本没读到的格子）
+    """
+    import cv2
+
+    if area.width <= 0 or area.height <= 0:
+        return []
+
+    # 先看哪些格子已经有名字了（调用方已经识别过就直接用，省一次 OCR）
+    if block_list is None:
+        block_list = read_text_blocks(ctx, screen, area)
+    filled_cells = {
+        dialog_grid_cell(block, area) for block in block_list
+        if is_dialog_agent_name(block)
+    }
+
+    cell_w = area.width / DIALOG_GRID_COLUMNS
+    cell_h = area.height / DIALOG_GRID_ROWS
+    found: list[DialogAgent] = []
+
+    for row in range(DIALOG_GRID_ROWS):
+        for col in range(DIALOG_GRID_COLUMNS):
+            if (row, col) in filled_cells:
+                continue
+
+            cell_x = area.x1 + col * cell_w
+            cell_y = area.y1 + row * cell_h
+            left_ratio, top_ratio, right_ratio, bottom_ratio = CELL_NAME_RATIO
+            x1 = int(cell_x + cell_w * left_ratio)
+            y1 = int(cell_y + cell_h * top_ratio)
+            x2 = int(cell_x + cell_w * right_ratio)
+            y2 = int(cell_y + cell_h * bottom_ratio)
+            if x2 <= x1 or y2 <= y1:
+                continue
+
+            crop = screen[y1:y2, x1:x2]
+            if crop.size == 0:
+                continue
+            zoomed = cv2.resize(
+                crop, None, fx=MISSING_NAME_ZOOM, fy=MISSING_NAME_ZOOM,
+                interpolation=cv2.INTER_CUBIC,
+            )
+            text = _normalize_text(ctx.ocr.run_ocr_single_line(zoomed))
+            if not text or _LEVEL_PATTERN.match(text) or _DIGIT_ONLY_PATTERN.match(text):
+                continue
+            if not str_utils.with_chinese(text):
+                continue
+            # 只收表里有的名字：被遮挡的格子会读出「方表」「清」这类碎片，宁可漏也别错
+            if text.strip('「」') not in _KNOWN_AGENT_NAMES:
+                log.info('格子 (行%d, 列%d) 补读到「%s」，不在代理人表里，丢弃', row, col, text)
+                continue
+
+            found.append(
+                DialogAgent(
+                    name=text,
+                    name_rect=Rect(x1, y1, x2, y2),
+                )
+            )
+            log.info('格子 (行%d, 列%d) 整屏没读到名字，补读得到「%s」', row, col, text)
+
+    return found
 
 
 def find_dialog_agent(block_list: list[TextBlock],
