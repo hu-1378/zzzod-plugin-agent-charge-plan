@@ -50,6 +50,10 @@ MAX_DIALOG_SCROLL_TIMES: int = 3
 DIALOG_SCROLL_MARGIN: int = 40
 #: 点完代理人或按钮后等界面反应的时间（秒）
 CLICK_WAIT: float = 1.2
+#: 点完格子后等几轮，让底部按钮从「清除目标」变成「设置为目标」
+SET_TARGET_SWITCH_WAIT_TIMES: int = 1
+#: 点完「设置为目标」后等多久再找确认框（弹窗有弹出动画）
+CONFIRM_DIALOG_WAIT: float = 1.5
 #: 点确认框之前先等几轮（弹窗有弹出动画）
 CONFIRM_WAIT_TIMES: int = 2
 #: 弹窗里滚动后等界面停稳的时间（秒）
@@ -246,14 +250,20 @@ class ChangeAgentPlanTarget(ZOperation):
         这一步不能省：点完格子只是「选中」，底部按钮会从「清除目标」变成「设置为目标」，
         不点它的话特训目标根本没换。
         """
-        # 按钮位置是固定的，先按文字找；文字认不出来就直接点区域中心。
-        # 原来只认文字，OCR 一失手就永远点不到，整条链静默跳过。
+        # 点完格子到按钮从「清除目标」变成「设置为目标」有个短暂延迟。
+        # 不等的话这一刻那个位置还是「清除目标」，盲点会点错东西。
+        if self.set_target_wait_times < SET_TARGET_SWITCH_WAIT_TIMES:
+            self.set_target_wait_times += 1
+            return self.round_wait(status='等底部按钮从「清除目标」变成「设置为目标」', wait=CLICK_WAIT)
+
         result = self.round_by_find_and_click_area(
             self.last_screenshot, CHANGE_TARGET_SCREEN, AREA_SET_TARGET_BUTTON,
             success_wait=CLICK_WAIT, retry_wait=1,
         )
         if result.is_success:
-            return result
+            # 点完不能马上识别：确认框有弹出动画，太早截图什么都看不到。
+            # 这里多等一段时间，下一节点再开始找「确认」。
+            return self.round_wait(status='已点击「设置为目标」，等确认框弹出', wait=CONFIRM_DIALOG_WAIT)
 
         try:
             rect: Rect = screen_areas.get_area_rect(
@@ -264,8 +274,7 @@ class ChangeAgentPlanTarget(ZOperation):
 
         log.info('没按文字认到「设置为目标」，直接点区域中心 %s', rect.center)
         self.ctx.controller.click(rect.center)
-        # 多等一会：确认框有弹出动画，等它出来再进下一步
-        return self.round_wait(status='盲点「设置为目标」', wait=CLICK_WAIT + 0.6)
+        return self.round_wait(status='盲点「设置为目标」，等确认框弹出', wait=CONFIRM_DIALOG_WAIT)
 
     @node_from(from_name='点设置为目标')
     @operation_node(name='点确认替换', node_max_retry_times=6)
@@ -276,6 +285,7 @@ class ChangeAgentPlanTarget(ZOperation):
         等不到才当成「这次操作不需要确认」，并且打一条 warning —— 宁可多等一秒，
         也不要因为一次误判把「切目标没成功」当成成功。
         """
+        # 上一步点完「设置为目标」已经等过 CONFIRM_DIALOG_WAIT，确认框这时候应该在了
         result = self.round_by_find_and_click_area(
             self.last_screenshot, CONFIRM_REPLACE_SCREEN, AREA_CONFIRM_OK_BUTTON,
             success_wait=CLICK_WAIT, retry_wait=1,
