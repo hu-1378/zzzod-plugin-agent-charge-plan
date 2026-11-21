@@ -226,19 +226,25 @@ class ChangeAgentPlanTarget(ZOperation):
         这一步不能省：点完格子只是「选中」，底部按钮会从「清除目标」变成「设置为目标」，
         不点它的话特训目标根本没换。
         """
-        if not self._is_dialog_open():
-            # 有的情况点格子直接生效、弹窗自己关了
-            return self.round_success(status='弹窗已关闭，按已生效处理')
-
+        # 按钮位置是固定的，先按文字找；文字认不出来就直接点区域中心。
+        # 原来只认文字，OCR 一失手就永远点不到，整条链静默跳过。
         result = self.round_by_find_and_click_area(
             self.last_screenshot, CHANGE_TARGET_SCREEN, AREA_SET_TARGET_BUTTON,
             success_wait=CLICK_WAIT, retry_wait=1,
         )
-        if not result.is_success:
-            # 找不到「设置为目标」多半是没选中、或者按钮位置量偏了，存图备查
-            log.warning('点「设置为目标」没成功（%s），截图：%s', result.status,
-                        self.save_screenshot('change_no_set_target'))
-        return result
+        if result.is_success:
+            return result
+
+        try:
+            rect: Rect = screen_areas.get_area_rect(
+                self.ctx, CHANGE_TARGET_SCREEN, AREA_SET_TARGET_BUTTON
+            )
+        except LookupError:
+            return self.round_fail(status=f'{CHANGE_TARGET_SCREEN}.{AREA_SET_TARGET_BUTTON} 没配置')
+
+        log.info('没按文字认到「设置为目标」，直接点区域中心 %s', rect.center)
+        self.ctx.controller.click(rect.center)
+        return self.round_wait(status='盲点「设置为目标」', wait=CLICK_WAIT)
 
     @node_from(from_name='点设置为目标')
     @operation_node(name='点确认替换', node_max_retry_times=6)
@@ -249,14 +255,32 @@ class ChangeAgentPlanTarget(ZOperation):
         等不到才当成「这次操作不需要确认」，并且打一条 warning —— 宁可多等一秒，
         也不要因为一次误判把「切目标没成功」当成成功。
         """
-        if agent_plan_page.is_confirm_replace_dialog(self.ctx, self.last_screenshot):
-            return self.round_by_find_and_click_area(
-                self.last_screenshot, CONFIRM_REPLACE_SCREEN, AREA_CONFIRM_OK_BUTTON,
-                success_wait=CLICK_WAIT, retry_wait=1,
-            )
-
-        if self.node_retry_times < CONFIRM_WAIT_TIMES:
+        # 确认框有弹出动画：先等它出来（最多两轮），免得点到别的按钮上
+        if self.node_retry_times < CONFIRM_WAIT_TIMES \
+                and not agent_plan_page.is_confirm_replace_dialog(self.ctx, self.last_screenshot):
             return self.round_retry(status='等确认框出现', wait=1)
+
+        result = self.round_by_find_and_click_area(
+            self.last_screenshot, CONFIRM_REPLACE_SCREEN, AREA_CONFIRM_OK_BUTTON,
+            success_wait=CLICK_WAIT, retry_wait=1,
+        )
+        if result.is_success:
+            return result
+
+        # 文字没认到但确认框确实开着：按区域中心点
+        if agent_plan_page.is_confirm_replace_dialog(self.ctx, self.last_screenshot):
+            try:
+                ok_rect: Rect = screen_areas.get_area_rect(
+                    self.ctx, CONFIRM_REPLACE_SCREEN, AREA_CONFIRM_OK_BUTTON
+                )
+            except LookupError:
+                return self.round_fail(
+                    status=f'{CONFIRM_REPLACE_SCREEN}.{AREA_CONFIRM_OK_BUTTON} 没配置'
+                )
+            log.info('没按文字认到「确认」，直接点区域中心 %s', ok_rect.center)
+            self.ctx.controller.click(ok_rect.center)
+            return self.round_wait(status='盲点「确认」', wait=CLICK_WAIT)
+        return result
 
         log.warning(
             '点了「设置为目标」但等不到确认框，按已生效处理；'
