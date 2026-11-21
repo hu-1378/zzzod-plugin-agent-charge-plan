@@ -6,8 +6,18 @@
 # 用途：「代理人技能」这个特训条目要按角色属性选具体副本（刚性测试=物理、电流测试=电属性……），
 # 属性查错就会排错本。
 #
-# 数据来源：游戏内代理人界面的属性图标。
+# 数据来源：游戏内代理人界面的属性图标 + HoYoWiki / 百度百科。
+#
+# 注意：查表是「名字完全相等」才算命中，不做包含匹配，
+# 所以「比利」的规则不会误伤「星辉比利」。
 override_list:
   - agent_name: 比利
     element: 物理属性
-    note: 游戏里比利·奇德是物理属性，主仓 src/zzz_od/game_data/agent.py 标的是 ELECTRIC
+    note: >-
+      小比利（比利·奇德，A 级强攻）是物理属性，主仓 agent.py:233 和
+      assets/game_data/agent/billy.yml 都标成了 ELECTRIC。
+  - agent_name: 星辉比利
+    element: 物理属性
+    note: >-
+      大比利（星辉比利，S 级强攻）主仓标的是 PHYSICAL，本来就对；
+      这里显式写一条，防止以后主仓改动时又错回去。
