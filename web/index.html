@@ -89,34 +89,37 @@
 </head>
 <body>
 <header>
-  <h1>体力计划配置（本地页面，不启动一条龙）</h1>
+  <h1>特训目标体力计划 · 本地配置</h1>
   <div class="row">
-    <label class="field">实例号<select id="selInstance"></select></label>
-    <label class="field">组<select id="selGroup"></select></label>
-    <label class="field">配置文件<select id="selApp"></select></label>
+    <label class="field">账号<select id="selInstance"></select></label>
+    <label class="field">应用组<select id="selGroup"></select></label>
+    <label class="field">编辑哪份配置<select id="selApp"></select></label>
     <button id="btnReload" type="button">重新加载</button>
   </div>
-  <div class="path-row">
-    <span>配置文件绝对路径</span>
+  <details class="path-row">
+    <summary>配置文件在哪</summary>
     <code id="pathText" title="点击复制">（未加载）</code>
-  </div>
+  </details>
   <div id="banner" class="banner"></div>
 </header>
 
 <main>
   <section class="card">
-    <h2>全局选项</h2>
+    <h2>其他设置</h2>
     <div class="row">
-      <label class="field">恢复电量<select id="selRestore"></select></label>
-      <span class="hint">保存时只提交页面上的字段，文件里其它键（含 history_list）原样保留。</span>
+      <label class="field">跑完恢复电量<select id="selRestore"></select></label>
+      <span class="hint">保存只会改这一页上能看到的东西，文件里其它设置不会被动。</span>
     </div>
   </section>
 
   <section class="card" id="agentCard">
-    <h2>要养的角色（写进 agent_charge_plan.yml 的 batch_agent_names）</h2>
+    <h2>要养的角色</h2>
     <div class="row">
       <label class="field">运行模式<select id="selRunMode"></select></label>
-      <span id="runModeHint" class="hint">「只排计划」= 还是写进内置体力计划，由它去跑；「自己边刷边算」= 这个应用自己一轮刷一个副本，刷完记账，不再需要内置体力计划。</span>
+    </div>
+    <div class="hint agent-note" id="runModeHintBox">
+      只排计划：算好以后写进「体力计划」应用，由它照常去刷，这个插件不自己动手。<br>
+      自己边刷边算：这个插件每一轮刷一个副本，刷完自己记账、自动切下一个角色，不需要「体力计划」应用。
     </div>
     <div class="row">
       <button id="btnAgentAll" type="button">全选</button>
@@ -126,7 +129,10 @@
     </div>
     <div id="agentHint" class="hint agent-hint"></div>
     <div id="agentList" class="agent-grid"></div>
-    <div class="hint agent-note">角色名单是游戏里「扫描代理人列表」写进来的，本页只负责勾选和保存；勾完和体力计划一起点下面的保存。</div>
+    <div class="hint agent-note">
+      名单来自游戏里跑一次「只扫描代理人名单」。勾选的角色会依次切成特训目标去读清单，
+      跑完会把特训目标恢复成原来的那个。
+    </div>
   </section>
 
   <section id="planList"></section>
@@ -584,7 +590,7 @@
     var hint = $('runModeHint');
     if (!info || !info.exists) {
       hint.className = 'hint';
-      hint.textContent = '还没有 agent_charge_plan.yml —— 先在游戏里跑一次这个应用，再回来改运行模式。';
+      hint.textContent = '还没有这个应用的配置 —— 先在游戏里跑一次它，再回来改设置。';
       return;
     }
     hint.className = 'hint';
@@ -636,13 +642,13 @@
 
     if (!info) {
       hint.className = 'hint agent-hint';
-      hint.textContent = '读不到 agent_charge_plan.yml（当前实例可能还没有这个应用的配置）。';
+      hint.textContent = '读不到配置（这个账号可能还没跑过这个应用）。';
       $('agentCount').textContent = '';
       return;
     }
     if (!info.exists) {
       hint.className = 'hint agent-hint';
-      hint.textContent = '还没有 ' + (info.rel_path || 'agent_charge_plan.yml') +
+      hint.textContent = '还没有配置文件：' + (info.rel_path || '') +
         ' —— 先在游戏里跑一次「扫描代理人列表」，再回来勾选。';
       $('agentCount').textContent = '';
       return;
