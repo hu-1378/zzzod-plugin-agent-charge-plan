@@ -11,6 +11,8 @@ from one_dragon.base.geometry.rectangle import Rect
 from one_dragon.base.operation.operation_edge import node_from
 from one_dragon.base.operation.operation_node import operation_node
 from one_dragon.base.operation.operation_round_result import OperationRoundResult
+from one_dragon.utils.log_utils import log
+from zzz_od.operation.back_to_normal_world import BackToNormalWorld
 from zzz_od.operation.zzz_operation import ZOperation
 
 from . import agent_plan_page, screen_areas
@@ -25,9 +27,28 @@ class GotoAgentPlan(ZOperation):
     def __init__(self, ctx: ZContext) -> None:
         ZOperation.__init__(self, ctx, op_name='进入特训目标页')
 
-    @operation_node(name='前往训练TAB', is_start_node=True, node_max_retry_times=10)
+    @operation_node(name='返回大世界', is_start_node=True)
+    def back_to_world(self) -> OperationRoundResult:
+        """先看能不能直接走到训练 TAB；走不通就先回大世界。
+
+        这一步是照内置 `TransportByCompendium` 抄的：它的第一个节点也是这个判断。
+        少了这步，画面识别错的时候（比如把大世界判成快捷手册）会一直在原地空转，
+        因为导航目标"看起来"就在当前画面里，实际点的是不存在的按钮。
+        """
+        current, can_go = self.check_screen_with_can_go(
+            self.last_screenshot, screen_areas.COMPENDIUM_TRAINING_SCREEN
+        )
+        if can_go:
+            return self.round_success(status=f'当前画面 {current}，可直接前往')
+
+        log.info('当前画面 %s 走不到训练 TAB，先回大世界', current)
+        op = BackToNormalWorld(self.ctx, ensure_normal_world=True)
+        return self.round_by_op_result(op.execute())
+
+    @node_from(from_name='返回大世界')
+    @operation_node(name='前往训练TAB', node_max_retry_times=10)
     def goto_training_tab(self) -> OperationRoundResult:
-        """用主仓的画面路线走到快捷手册的训练 TAB。"""
+        """从大世界走到快捷手册的训练 TAB。"""
         return self.round_by_goto_screen(
             screen=self.last_screenshot,
             screen_name=screen_areas.COMPENDIUM_TRAINING_SCREEN,
