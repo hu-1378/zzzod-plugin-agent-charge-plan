@@ -229,10 +229,16 @@ class ChangeAgentPlanTarget(ZOperation):
         if not self._is_dialog_open():
             # 有的情况点格子直接生效、弹窗自己关了
             return self.round_success(status='弹窗已关闭，按已生效处理')
-        return self.round_by_find_and_click_area(
+
+        result = self.round_by_find_and_click_area(
             self.last_screenshot, CHANGE_TARGET_SCREEN, AREA_SET_TARGET_BUTTON,
             success_wait=CLICK_WAIT, retry_wait=1,
         )
+        if not result.is_success:
+            # 找不到「设置为目标」多半是没选中、或者按钮位置量偏了，存图备查
+            log.warning('点「设置为目标」没成功（%s），截图：%s', result.status,
+                        self.save_screenshot('change_no_set_target'))
+        return result
 
     @node_from(from_name='点设置为目标')
     @operation_node(name='点确认替换', node_max_retry_times=6)
@@ -254,8 +260,9 @@ class ChangeAgentPlanTarget(ZOperation):
 
         log.warning(
             '点了「设置为目标」但等不到确认框，按已生效处理；'
-            '如果特训目标没变，检查 %s 的「%s」区域是否盖住了标题文字',
+            '如果特训目标没变，检查 %s 的「%s」区域是否盖住了标题文字。截图：%s',
             CONFIRM_REPLACE_SCREEN, '标题-确认替换',
+            self.save_screenshot('change_no_confirm_dialog'),
         )
         return self.round_success(status='没有确认框，按已生效处理')
 
@@ -265,6 +272,7 @@ class ChangeAgentPlanTarget(ZOperation):
         """弹窗关上后，核对页面上的特训目标确实换成了目标代理人。"""
         if self._is_dialog_open():
             if self.node_retry_times >= self.node_max_retry_times - 1:
+                log.warning('切换后弹窗还没关，截图：%s', self.save_screenshot('change_dialog_stuck'))
                 # 兜底：把弹窗关掉，免得卡在弹窗上，然后明确报失败
                 self._close_dialog()
                 return self.round_fail(status='点了代理人但弹窗没自己关，特训目标没换成')
