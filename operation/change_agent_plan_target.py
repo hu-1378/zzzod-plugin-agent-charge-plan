@@ -384,8 +384,11 @@ class ChangeAgentPlanTarget(ZOperation):
                 self.ctx,
                 area,
                 direction='up',
-                start_ratio=DIALOG_SCROLL_END_RATIO,
-                end_ratio=DIALOG_SCROLL_START_RATIO,
+                # 比例和往下滚一样（大 -> 小），方向由 direction 决定。
+                # 主仓 screen_utils.scroll_area 内部会按 direction 决定手势，
+                # 把比例反过来说等于又变回「往下翻」，越滚越远。
+                start_ratio=DIALOG_SCROLL_START_RATIO,
+                end_ratio=DIALOG_SCROLL_END_RATIO,
                 duration=DIALOG_BACK_TO_TOP_SECONDS,
             )
             time.sleep(DIALOG_BACK_TO_TOP_WAIT)
