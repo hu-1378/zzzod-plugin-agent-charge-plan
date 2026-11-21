@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import time
 from typing import TYPE_CHECKING
 
 from one_dragon.base.geometry.point import Point
@@ -58,7 +59,10 @@ DIALOG_SCROLL_START_RATIO: float = 0.80
 DIALOG_SCROLL_END_RATIO: float = 0.20
 DIALOG_SCROLL_SECONDS: float = 1.0
 #: 回顶部滚几次（一屏 2 行，32 个角色最多 3 屏，滚 4 次足够）
-DIALOG_BACK_TO_TOP_TIMES: int = 4
+DIALOG_BACK_TO_TOP_TIMES: int = 3
+#: 回顶部时每次拖多久、拖完等多久（比往下找快，避免看起来像卡住）
+DIALOG_BACK_TO_TOP_SECONDS: float = 0.55
+DIALOG_BACK_TO_TOP_WAIT: float = 0.45
 
 #: 节点返回的状态：要清除目标
 STATUS_NEED_CLEAR: str = '需要清除目标'
@@ -362,6 +366,29 @@ class ChangeAgentPlanTarget(ZOperation):
             cell_rect.x1 <= center.x <= cell_rect.x2
             and cell_rect.y1 <= center.y <= cell_rect.y2
         )
+
+    def _back_to_top(self, area: Rect) -> None:
+        """把弹窗网格滚回最顶上。
+
+        每次切角色都从顶部开始找：往下找是唯一的搜索方向，不先回顶的话，
+        上一个角色滚到哪里，下一个就从那里接着找，目标在它上面就永远找不到。
+
+        回顶部不需要慢慢拖：目的是尽快到顶，拖太久反而像卡住，所以用更短的
+        拖拽时长和等待。
+
+        Args:
+            area: 代理人网格区域
+        """
+        for _ in range(DIALOG_BACK_TO_TOP_TIMES):
+            screen_areas.scroll_rect(
+                self.ctx,
+                area,
+                direction='up',
+                start_ratio=DIALOG_SCROLL_END_RATIO,
+                end_ratio=DIALOG_SCROLL_START_RATIO,
+                duration=DIALOG_BACK_TO_TOP_SECONDS,
+            )
+            time.sleep(DIALOG_BACK_TO_TOP_WAIT)
 
     def _drag_dialog(self, area: Rect) -> None:
         """在弹窗网格里往下滚一屏。
