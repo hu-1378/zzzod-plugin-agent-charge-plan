@@ -333,6 +333,12 @@ class ScanAgentList(ZOperation):
         screen_name_list, fingerprint = read_dialog_screen(
             self.ctx, self.last_screenshot, area
         )
+        # 留一张图，事后排查「这一屏到底读到了什么」用。走主仓的 save_screenshot，
+        # 会自动给 UID 打码并落到 .debug/images/
+        log.info(
+            '本屏截图：%s',
+            self.save_screenshot(f'scan_agent_p{self.scroll_times + 1}'),
+        )
         self.name_list, new_count = merge_agent_names(self.name_list, screen_name_list)
         log.info(
             '代理人名单 第 %d 屏读到 %d 个，新增 %d 个，累计 %d 个',
@@ -384,6 +390,23 @@ class ScanAgentList(ZOperation):
         Returns:
             读到名字就成功（data 是 `AgentNameList`），一个都没读到就失败
         """
+        # 不在代理人表里的名字多半是单字被遮挡读错（实测「雅」读成「好」，滚到中间后
+        # 又能读对，于是多出一个不存在的角色）。宁可漏也别错，直接丢掉并记一笔。
+        kept: list[str] = []
+        dropped: list[str] = []
+        for one in self.name_list:
+            if one.strip('「」') in _KNOWN_AGENT_NAMES:
+                kept.append(one)
+            else:
+                dropped.append(one)
+        if dropped:
+            log.warning(
+                '这些名字不在项目代理人表里，已丢弃：%s'
+                '（如果是新角色，往 assets/agent_element_override.yml 加一行即可）',
+                '、'.join(dropped),
+            )
+        self.name_list = kept
+
         if self._is_dialog_open():
             self._close_dialog()
             # 点完之后重新截一张图再看，否则判断的还是点之前那一帧
