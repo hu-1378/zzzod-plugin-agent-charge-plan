@@ -57,6 +57,8 @@ SCROLL_DIALOG_WAIT: float = 1.2
 DIALOG_SCROLL_START_RATIO: float = 0.80
 DIALOG_SCROLL_END_RATIO: float = 0.20
 DIALOG_SCROLL_SECONDS: float = 1.0
+#: 回顶部滚几次（一屏 2 行，32 个角色最多 3 屏，滚 4 次足够）
+DIALOG_BACK_TO_TOP_TIMES: int = 4
 
 #: 节点返回的状态：要清除目标
 STATUS_NEED_CLEAR: str = '需要清除目标'
@@ -96,6 +98,8 @@ class ChangeAgentPlanTarget(ZOperation):
         """弹窗里已经往下滚了几次"""
 
         self.clicked_agent_name: str = ''
+        self.backed_to_top: bool = False
+        """这次弹窗是不是已经滚回顶部了（每个角色只滚一次）"""
         """这次点过的代理人名字，用来在确认时核对"""
 
     @operation_node(name='读取当前目标', is_start_node=True, node_max_retry_times=3)
@@ -196,6 +200,14 @@ class ChangeAgentPlanTarget(ZOperation):
         area = self._dialog_area(AREA_AGENT_GRID)
         if area is None:
             return self.round_fail(status='代理人网格区域没配置')
+
+        # 先滚回顶部再找。原来只会往下滚，目标在上面时永远找不到；
+        # 而且上一个角色滚到哪里，下一个就从那里继续找。
+        if not self.backed_to_top:
+            self._back_to_top(area)
+            self.backed_to_top = True
+            self.screenshot()
+            return self.round_wait(status='已回到网格顶部', wait=SCROLL_DIALOG_WAIT)
 
         block_list = agent_plan_page.read_text_blocks(self.ctx, self.last_screenshot, area)
         agent: DialogAgent | None = agent_plan_page.find_dialog_agent(
