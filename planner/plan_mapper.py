@@ -22,7 +22,10 @@ from __future__ import annotations
 
 import difflib
 from dataclasses import dataclass, replace
+from pathlib import Path
 from typing import TYPE_CHECKING
+
+import yaml
 
 from one_dragon.utils.log_utils import log
 from zzz_od.application.charge_plan.charge_plan_config import (
@@ -53,6 +56,13 @@ TAB_NAME = '训练'
 FUZZY_CUTOFF: float = 0.7
 #: 模糊匹配允许的长度差，防止短名字乱配长名字
 FUZZY_MAX_LENGTH_DIFF: int = 4
+
+#: 插件自带的属性纠正表（主仓 agent.py 有误时在这里纠正）
+_ELEMENT_OVERRIDE_PATH: Path = (
+    Path(__file__).resolve().parent.parent / 'assets' / 'agent_element_override.yml'
+)
+#: 纠正表缓存，避免每次查属性都读一遍文件
+_ELEMENT_OVERRIDE_CACHE: dict[str, str] | None = None
 
 #: 三个固定电量分类，和 charge_budget.CATEGORY_FIXED_CHARGE 对上
 CATEGORY_AREA_PATROL = '区域巡防'
@@ -136,9 +146,46 @@ def _element_keys(text: str | None) -> set[str]:
     return keys
 
 
+def load_element_override(path: Path | None = None) -> dict[str, str]:
+    """读插件自带的「属性纠正表」。
+
+    主仓 `agent.py` 里有个别角色的属性和游戏不一致（例如「比利」被标成电属性，
+    实际是物理），但插件不能改主仓，所以在这里纠正。
+
+    Args:
+        path: 覆盖表路径；不传就用插件自带的 `assets/agent_element_override.yml`
+
+    Returns:
+        {归一化后的角色名: 属性文本}。文件不存在或读坏时返回空表（不抛异常）
+    """
+    global _ELEMENT_OVERRIDE_CACHE
+    if _ELEMENT_OVERRIDE_CACHE is not None and path is None:
+        return _ELEMENT_OVERRIDE_CACHE
+
+    target_path = path if path is not None else _ELEMENT_OVERRIDE_PATH
+    result: dict[str, str] = {}
+    try:
+        if target_path.exists():
+            data = yaml.safe_load(target_path.read_text(encoding='utf-8')) or {}
+            for row in data.get('override_list') or []:
+                if not isinstance(row, dict):
+                    continue
+                name = normalize_name(row.get('agent_name'))
+                element = row.get('element')
+                if name and isinstance(element, str) and element.strip():
+                    result[name] = element.strip()
+    except Exception:
+        log.error('读属性纠正表出错：%s', target_path, exc_info=True)
+
+    if path is None:
+        _ELEMENT_OVERRIDE_CACHE = result
+    return result
+
+
 def lookup_agent_element(agent_name: str) -> str | None:
     """按游戏里的代理人名字查属性，返回「电属性」这种文本。
 
+    查的顺序：先查插件自带的属性纠正表（主仓数据有误时用），再查主仓代理人表。
     游戏页面上是「安东·伊万诺夫」这种全名，项目的代理人表里只有代号「安东」，
     所以先拿全名比，再拿「·」前面的代号比。都不中就返回 None，由调用方降级成 warning。
 
@@ -155,6 +202,11 @@ def lookup_agent_element(agent_name: str) -> str | None:
     candidates = [text]
     if '·' in text:
         candidates.append(text.split('·')[0])
+
+    override = load_element_override()
+    for candidate in candidates:
+        if candidate in override:
+            return override[candidate]
 
     for candidate in candidates:
         for member in AgentEnum:
