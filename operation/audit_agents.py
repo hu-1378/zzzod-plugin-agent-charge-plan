@@ -322,6 +322,88 @@ def combined_warnings(plan_result: PlanBuildResult) -> list[str]:
     return list(plan_result.warnings) + collect_skip_warnings(plan_result)
 
 
+#: 汇总里按原因归类用的关键词。顺序有讲究：先匹配更具体的
+_WARNING_CATEGORIES: tuple[tuple[str, str], ...] = (
+    ('驱动盘分组按配置不排', '驱动盘分组没排（配置关着）'),
+    ('在副本表里找不到', '条目在副本表里找不到（可能是新版本）'),
+    ('要按角色属性选副本', '代理人技能查不到属性'),
+    ('进度已经够了', '进度已经够了'),
+    ('在材料表里没有', '材料表里没有'),
+)
+
+
+def _categorize_warning(text: str) -> str:
+    """把一条提示归到某个原因上。
+
+    Args:
+        text: 提示原文
+
+    Returns:
+        归类名；认不出的归到「其它」
+    """
+    for keyword, category in _WARNING_CATEGORIES:
+        if keyword in text:
+            return category
+    return '其它'
+
+
+def build_analysis_lines(result_list: list[AuditAgentResult]) -> list[str]:
+    """生成正确率分析那一段。
+
+    Args:
+        result_list: 每个角色的核对结果
+
+    Returns:
+        markdown 行
+    """
+    total = len(result_list)
+    failed = [item for item in result_list if not item.ok]
+    clean = [item for item in result_list if item.ok and not item.warnings]
+    warn = [item for item in result_list if item.ok and item.warnings]
+
+    lines: list[str] = ['## 分析', '']
+    lines.append(f'- 角色总数：{total}（读取成功 {total - len(failed)} / 失败 {len(failed)}）')
+    lines.append(f'- **完全正常**（没有任何提示）：{len(clean)} 个角色')
+    lines.append(f'- 有提示（有条目被跳过或认不出）：{len(warn)} 个角色')
+    if total > 0:
+        rate = len(clean) / total * 100
+        lines.append(f'- 无提示比例：{rate:.0f}%')
+    lines.append('')
+
+    if failed:
+        lines.append('### 读取失败的角色')
+        lines.append('')
+        for item in failed:
+            lines.append(f'- {_md_cell(item.agent_name)}：{_md_cell(item.error)}')
+        lines.append('')
+
+    counter: dict[str, int] = {}
+    for item in result_list:
+        for warning in item.warnings:
+            category = _categorize_warning(warning)
+            counter[category] = counter.get(category, 0) + 1
+
+    if counter:
+        lines.append('### 提示按原因统计')
+        lines.append('')
+        lines.append('| 原因 | 次数 |')
+        lines.append('|---|---|')
+        for category, count in sorted(counter.items(), key=lambda kv: -kv[1]):
+            lines.append(f'| {_md_cell(category)} | {count} |')
+        lines.append('')
+
+    if warn:
+        lines.append('### 有条目的角色（逐个看）')
+        lines.append('')
+        for item in warn:
+            first = item.warnings[0] if item.warnings else ''
+            more = f'（还有 {len(item.warnings) - 1} 条）' if len(item.warnings) > 1 else ''
+            lines.append(f'- {_md_cell(item.agent_name)}：{_md_cell(first)}{more}')
+        lines.append('')
+
+    return lines
+
+
 def build_summary_markdown(
     result_list: list[AuditAgentResult],
     output_root: Path,
@@ -361,6 +443,8 @@ def build_summary_markdown(
     lines.append(
         '「可刷条数」是算出来的计划项条数（已经过电量预算）；备注里的提示来自『计划.yml』的 warnings。'
     )
+    lines.append("")
+    lines.extend(build_analysis_lines(result_list))
     return '\n'.join(lines) + '\n'
 
 
