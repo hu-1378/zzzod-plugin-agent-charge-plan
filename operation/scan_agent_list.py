@@ -144,7 +144,7 @@ def read_dialog_screen(
         (这一屏读到的名字, 文字指纹)。名字可能带同一格在滚动边界上重复读出来的条目
     """
     block_list = agent_plan_page.read_text_blocks(ctx, screen, area)
-    name_list = [agent.name for agent in agent_plan_page.parse_dialog_agents(block_list)]
+    name_list = [agent.name for agent in agent_plan_page.parse_dialog_agents_by_grid(block_list, area)]
     fingerprint = '|'.join(sorted(block.text for block in block_list))
     return name_list, fingerprint
 

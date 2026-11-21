@@ -24,20 +24,21 @@ if TYPE_CHECKING:
     from conftest import StubContext
 
 
-#: 弹窗截图里能认出来的 9 个代理人，顺序 = `agent_plan_page.parse_dialog_agents` 的排序规则
-#: （先按名字框中心纵坐标，再按左边缘），不是人眼看的「先上后下」。
-#: 和 `test_change_agent_plan_target.EXPECTED_NAMES` 是同一份事实，那份守的是找人的解析规则，
-#: 这份守的是扫描这条链路读出来的东西。
+#: 弹窗截图里能认出来的 9 个代理人。
+#:
+#: 顺序 = 网格阅读顺序（先左右后上下）：网格 6 列 2 行，第一行 6 个、第二行 3 个。
+#: 走的是 `agent_plan_page.parse_dialog_agents_by_grid`，按格子行列排序，
+#: 不再按 OCR 文字块中心坐标排（同一行里 y 有 ±1px 抖动，顺序会乱）。
 EXPECTED_DIALOG_NAMES: list[str] = [
+    '叶瞬光',
+    '蕾米埃尔',
     '佩洛伊斯',
     '琉音',
     '卢西娅',
     '仪玄',
-    '叶瞬光',
-    '蕾米埃尔',
+    '照',
     '薇薇安',
     '艾莲',
-    '照',
 ]
 
 

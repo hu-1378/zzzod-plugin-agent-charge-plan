@@ -496,6 +496,70 @@ def _fill_item(target: AgentPlanItem, source: AgentPlanItem) -> None:
 # ============================= 更换弹窗解析 =============================
 
 
+#: 代理人弹窗网格的列数与行数（实测 6 列 2 行，一屏 12 格）
+DIALOG_GRID_COLUMNS: int = 6
+DIALOG_GRID_ROWS: int = 2
+
+
+def dialog_grid_cell(block: TextBlock, area: Rect) -> tuple[int, int] | None:
+    """文本块落在第几行第几列的格子里。
+
+    Args:
+        block: 文本块
+        area: 代理人网格区域
+
+    Returns:
+        (行, 列) 从 0 开始；落在网格外返回 None
+    """
+    if area.width <= 0 or area.height <= 0:
+        return None
+
+    cx, cy = block.rect.center.x, block.rect.center.y
+    offset_x = cx - area.x1
+    offset_y = cy - area.y1
+    if offset_x < 0 or offset_y < 0 or offset_x >= area.width or offset_y >= area.height:
+        return None
+
+    cell_w = area.width / DIALOG_GRID_COLUMNS
+    cell_h = area.height / DIALOG_GRID_ROWS
+    return int(offset_y // cell_h), int(offset_x // cell_w)
+
+
+def parse_dialog_agents_by_grid(
+    block_list: list[TextBlock], area: Rect
+) -> list[DialogAgent]:
+    """按 6x2 格子解析代理人名字，一格最多出一个。
+
+    这样即使 OCR 把某个名字切成两半、或者把格子外面的装饰文字也读了出来，
+    也不会多出一个不存在的角色：碎片会被归到同一格，装饰文字归不进任何格子。
+
+    Args:
+        block_list: 网格区的文本块
+        area: 代理人网格区域
+
+    Returns:
+        代理人列表，按「先左右后上下」的顺序
+    """
+    cell_map: dict[tuple[int, int], list[TextBlock]] = {}
+    for block in block_list:
+        cell = dialog_grid_cell(block, area)
+        if cell is None:
+            continue
+        cell_map.setdefault(cell, []).append(block)
+
+    agent_list: list[DialogAgent] = []
+    for cell in sorted(cell_map.keys()):
+        candidates = [block for block in cell_map[cell] if is_dialog_agent_name(block)]
+        if not candidates:
+            continue
+        # 同一格里如果读出了多段文字，取最长的那段当名字；等级、碎片都比名字短
+        best = max(candidates, key=lambda block: len(_normalize_text(block.text)))
+        agent_list.append(
+            DialogAgent(name=_normalize_text(best.text), name_rect=best.rect)
+        )
+    return agent_list
+
+
 def parse_dialog_agents(block_list: list[TextBlock]) -> list[DialogAgent]:
     """把更换弹窗里代理人网格的 OCR 文字块拼成代理人列表。
 
