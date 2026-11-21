@@ -602,6 +602,52 @@ def is_dialog_agent_name(block: TextBlock) -> bool:
     return str_utils.with_chinese(text)
 
 
+#: 放大重识别时，名字框向外扩的像素（把被裁掉的笔画含进来）
+ZOOM_NAME_PADDING: int = 6
+#: 放大倍率。名字本身只有 20~30px 高，放大 2 倍识别率明显更好
+ZOOM_NAME_SCALE: float = 2.0
+
+
+def refine_dialog_name(ctx: ZContext, screen: MatLike, agent: DialogAgent) -> str:
+    """把名字框放大后重新识别一次，用于纠正单字错字。
+
+    实测「雅」在第二行被底部滚动条挡掉下半截时会读成「好」，而「好」不是任何角色。
+    放大重识别能救回来一部分。
+
+    Args:
+        ctx: 一条龙上下文
+        screen: 整屏截图
+        agent: 网格解析出来的代理人（带名字框）
+
+    Returns:
+        重新识别到的名字；识别不出来就返回原名字
+    """
+    import cv2
+
+    rect = agent.name_rect
+    x1 = max(0, int(rect.x1) - ZOOM_NAME_PADDING)
+    y1 = max(0, int(rect.y1) - ZOOM_NAME_PADDING)
+    x2 = int(rect.x2) + ZOOM_NAME_PADDING
+    y2 = int(rect.y2) + ZOOM_NAME_PADDING
+    if x2 <= x1 or y2 <= y1:
+        return agent.name
+
+    crop = screen[y1:y2, x1:x2]
+    if crop.size == 0:
+        return agent.name
+
+    zoomed = cv2.resize(
+        crop, None, fx=ZOOM_NAME_SCALE, fy=ZOOM_NAME_SCALE,
+        interpolation=cv2.INTER_CUBIC,
+    )
+    text = _normalize_text(ctx.ocr.run_ocr_single_line(zoomed))
+    if not text:
+        return agent.name
+    if _LEVEL_PATTERN.match(text) or _DIGIT_ONLY_PATTERN.match(text):
+        return agent.name
+    return text
+
+
 def find_dialog_agent(block_list: list[TextBlock],
                       target_name: str) -> DialogAgent | None:
     """在网格里找目标代理人。

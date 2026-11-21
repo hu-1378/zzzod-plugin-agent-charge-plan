@@ -48,6 +48,7 @@ from one_dragon.base.operation.operation_node import operation_node
 from one_dragon.base.operation.operation_round_result import OperationRoundResult
 from one_dragon.utils import str_utils
 from one_dragon.utils.log_utils import log
+from zzz_od.game_data.agent import AgentEnum
 from zzz_od.operation.zzz_operation import ZOperation
 
 from . import agent_plan_page, screen_areas
@@ -71,6 +72,11 @@ GRID_SCROLL_MARGIN: int = 60
 BACK_TO_TOP_TIMES: int = 4
 #: 往下最多滚几次。防止界面异常时死循环
 MAX_SCROLL_TIMES: int = 20
+
+#: 项目代理人表里的全部名字，用来判断 OCR 读出来的名字靠不靠谱
+_KNOWN_AGENT_NAMES: frozenset[str] = frozenset(
+    member.value.agent_name for member in AgentEnum
+)
 #: 「本屏没有新名字」连续出现几次就认定读完了
 NO_NEW_SCREEN_LIMIT: int = 2
 #: 判「是不是同一个人」的相似度。4 字名字 OCR 错 1 个字是 0.75，所以卡 0.75；
@@ -144,7 +150,18 @@ def read_dialog_screen(
         (这一屏读到的名字, 文字指纹)。名字可能带同一格在滚动边界上重复读出来的条目
     """
     block_list = agent_plan_page.read_text_blocks(ctx, screen, area)
-    name_list = [agent.name for agent in agent_plan_page.parse_dialog_agents_by_grid(block_list, area)]
+    agent_list = agent_plan_page.parse_dialog_agents_by_grid(block_list, area)
+    name_list: list[str] = []
+    for agent in agent_list:
+        name = agent.name
+        # 不在项目代理人表里的名字，多半是 OCR 认错了（实测「雅」读成「好」）。
+        # 放大重识别一次，能救回来就用新的。
+        if name.strip('「」') not in _KNOWN_AGENT_NAMES:
+            refined = agent_plan_page.refine_dialog_name(ctx, screen, agent)
+            if refined.strip('「」') in _KNOWN_AGENT_NAMES:
+                log.info('名字「%s」不在代理人表里，放大重识别得到「%s」', name, refined)
+                name = refined
+        name_list.append(name)
     fingerprint = '|'.join(sorted(block.text for block in block_list))
     return name_list, fingerprint
 
