@@ -558,12 +558,38 @@ def parse_dialog_agents_by_grid(
         candidates = [block for block in cell_map[cell] if is_dialog_agent_name(block)]
         if not candidates:
             continue
-        # 同一格里如果读出了多段文字，取最长的那段当名字；等级、碎片都比名字短
-        best = max(candidates, key=lambda block: len(_normalize_text(block.text)))
+        best = _pick_cell_name(candidates)
         agent_list.append(
             DialogAgent(name=_normalize_text(best.text), name_rect=best.rect)
         )
     return agent_list
+
+
+def _pick_cell_name(candidates: list[TextBlock]) -> TextBlock:
+    """从同一格的多段文字里挑一个当名字。
+
+    实测同一格会读到「好 | 雅 | Lv.60」这种：弹窗背景上有「特训方案 / 清除目标」等
+    半透明大字，被压暗后 OCR 会读出碎片（日、好、A、办、EXN…），和真名字落在同一格。
+
+    挑选顺序：
+    1. 项目代理人表里有的（真名字一定能对上）
+    2. 表里都没有时按文字高度，完整名字比碎片高
+    3. 一样高就按长度（多字名字比单字碎片可信）
+
+    不在这里做模糊匹配：新角色本来就不在表里，硬配到老角色上会把人认错。
+
+    Args:
+        candidates: 同一格里被认为是名字的文本块
+
+    Returns:
+        挑中的那个
+    """
+    in_table = [
+        block for block in candidates
+        if _normalize_text(block.text).strip('「」') in _KNOWN_AGENT_NAMES
+    ]
+    pool = in_table if in_table else candidates
+    return max(pool, key=lambda block: (block.rect.height, len(_normalize_text(block.text))))
 
 
 def parse_dialog_agents(block_list: list[TextBlock]) -> list[DialogAgent]:

@@ -390,22 +390,17 @@ class ScanAgentList(ZOperation):
         Returns:
             读到名字就成功（data 是 `AgentNameList`），一个都没读到就失败
         """
-        # 不在代理人表里的名字多半是单字被遮挡读错（实测「雅」读成「好」，滚到中间后
-        # 又能读对，于是多出一个不存在的角色）。宁可漏也别错，直接丢掉并记一笔。
-        kept: list[str] = []
-        dropped: list[str] = []
-        for one in self.name_list:
-            if one.strip('「」') in _KNOWN_AGENT_NAMES:
-                kept.append(one)
-            else:
-                dropped.append(one)
-        if dropped:
+        # 表里查不到的名字原样保留（可能是新版本角色），只记一笔方便排查
+        unknown = [
+            one for one in self.name_list
+            if one.strip('「」') not in _KNOWN_AGENT_NAMES
+        ]
+        if unknown:
             log.warning(
-                '这些名字不在项目代理人表里，已丢弃：%s'
-                '（如果是新角色，往 assets/agent_element_override.yml 加一行即可）',
-                '、'.join(dropped),
+                '这些名字不在项目代理人表里，原样保留（可能是新角色）：%s；'
+                '如果要按属性排「代理人技能」，往 assets/agent_element_override.yml 加一行',
+                '、'.join(unknown),
             )
-        self.name_list = kept
 
         if self._is_dialog_open():
             self._close_dialog()
