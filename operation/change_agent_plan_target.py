@@ -194,7 +194,9 @@ class ChangeAgentPlanTarget(ZOperation):
 
         self.clicked_agent_name = agent.name
         self.ctx.controller.click(agent.click_point())
-        return self.round_wait(status=f'点击 {agent.name}', wait=CLICK_WAIT)
+        # 点完直接进下一步（点设置为目标），不要留在这里等「选中状态」：
+        # 选中框的颜色判断不一定准，一旦判不出来就会无限点同一个位置
+        return self.round_success(status=f'点击 {agent.name}')
 
     @node_from(from_name='找并点击代理人')
     @operation_node(name='点设置为目标', node_max_retry_times=5)
