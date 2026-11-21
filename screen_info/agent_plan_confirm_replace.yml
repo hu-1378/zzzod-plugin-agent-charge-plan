@@ -6,10 +6,10 @@ area_list:
 - area_name: 标题-确认替换
   id_mark: true
   pc_rect:
-  - 700
-  - 435
-  - 1220
-  - 495
+  - 600
+  - 425
+  - 1330
+  - 505
   text: 是否替换
   lcs_percent: 0.5
   template_sub_dir: ''

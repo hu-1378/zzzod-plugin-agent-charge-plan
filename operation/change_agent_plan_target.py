@@ -49,6 +49,8 @@ MAX_DIALOG_SCROLL_TIMES: int = 3
 DIALOG_SCROLL_MARGIN: int = 40
 #: 点完代理人或按钮后等界面反应的时间（秒）
 CLICK_WAIT: float = 1.2
+#: 点确认框之前先等几轮（弹窗有弹出动画）
+CONFIRM_WAIT_TIMES: int = 2
 #: 弹窗里滚动后等界面停稳的时间（秒）
 SCROLL_DIALOG_WAIT: float = 0.8
 
@@ -233,16 +235,29 @@ class ChangeAgentPlanTarget(ZOperation):
         )
 
     @node_from(from_name='点设置为目标')
-    @operation_node(name='点确认替换', node_max_retry_times=5)
+    @operation_node(name='点确认替换', node_max_retry_times=6)
     def click_confirm_replace(self) -> OperationRoundResult:
-        """确认框「已将 xxx 设置为特训目标，是否替换？」里点「确认」。"""
-        if not agent_plan_page.is_confirm_replace_dialog(self.ctx, self.last_screenshot):
-            # 确认框没出来（已经生效或直接关了），交给下一步核对
-            return self.round_success(status='没有确认框，按已生效处理')
-        return self.round_by_find_and_click_area(
-            self.last_screenshot, CONFIRM_REPLACE_SCREEN, AREA_CONFIRM_OK_BUTTON,
-            success_wait=CLICK_WAIT, retry_wait=1,
+        """确认框「已将 xxx 设置为特训目标，是否替换？」里点「确认」。
+
+        这个框有弹出动画，点完「设置为目标」立刻截图可能还没出来，所以先等两轮。
+        等不到才当成「这次操作不需要确认」，并且打一条 warning —— 宁可多等一秒，
+        也不要因为一次误判把「切目标没成功」当成成功。
+        """
+        if agent_plan_page.is_confirm_replace_dialog(self.ctx, self.last_screenshot):
+            return self.round_by_find_and_click_area(
+                self.last_screenshot, CONFIRM_REPLACE_SCREEN, AREA_CONFIRM_OK_BUTTON,
+                success_wait=CLICK_WAIT, retry_wait=1,
+            )
+
+        if self.node_retry_times < CONFIRM_WAIT_TIMES:
+            return self.round_retry(status='等确认框出现', wait=1)
+
+        log.warning(
+            '点了「设置为目标」但等不到确认框，按已生效处理；'
+            '如果特训目标没变，检查 %s 的「%s」区域是否盖住了标题文字',
+            CONFIRM_REPLACE_SCREEN, '标题-确认替换',
         )
+        return self.round_success(status='没有确认框，按已生效处理')
 
     @node_from(from_name='点确认替换')
     @operation_node(name='确认切换结果', node_max_retry_times=5)
