@@ -272,7 +272,25 @@ def parse_plan_items(block_list: list[TextBlock], area: Rect) -> list[AgentPlanI
         elif kind == 'go' and current is not None:
             current.go_button_center = block.rect.center
 
-    return item_list
+    return [item for item in item_list if _is_real_plan_item(item)]
+
+
+def _is_real_plan_item(item: AgentPlanItem) -> bool:
+    """是不是一条真条目。
+
+    特训目标页的每一条都带电量（`20-100` / `40` / `60`），所以「名字很短 + 没读到电量」
+    基本是界面上的滚动箭头、图标、装饰文字被 OCR 当成了条目名（实测出现过一条叫 `A` 的假条目）。
+    只在这种两个条件同时成立时才丢，电量单独读失败的真条目还能留下。
+
+    Args:
+        item: 解析出来的候选条目
+
+    Returns:
+        True 表示像真条目
+    """
+    if item.charge_text:
+        return True
+    return len(item.name.strip()) >= 3
 
 
 def classify_text_block(block: TextBlock, area: Rect) -> str:

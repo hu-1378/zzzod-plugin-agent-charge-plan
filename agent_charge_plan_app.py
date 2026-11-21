@@ -398,8 +398,9 @@ class AgentChargePlanApp(ZApplication):
         for warning in write_result.warnings:
             log.warning(warning)
         log.info(
-            '写入结果：%s，计划项 %s 条（新增 %s / 更新 %s / 保持 %s）',
+            '写入结果：%s。本次生成 %s 条计划，内置计划列表现有 %s 条（新增 %s / 更新 %s / 保持 %s）',
             '预览（没写入）' if self.config.dry_run else '已写入',
+            len(build_result.plan_list),
             len(write_result.plan_list), add_count, update_count, keep_count,
         )
 

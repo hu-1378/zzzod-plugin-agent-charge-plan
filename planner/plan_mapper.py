@@ -20,6 +20,7 @@
 
 from __future__ import annotations
 
+import difflib
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
@@ -47,6 +48,11 @@ if TYPE_CHECKING:
 
 #: 体力计划里的 tab 名称，内置数据都在「训练」这个 tab 下
 TAB_NAME = '训练'
+
+#: 精确匹配不到时的模糊匹配阈值（0~1，越高越严）
+FUZZY_CUTOFF: float = 0.7
+#: 模糊匹配允许的长度差，防止短名字乱配长名字
+FUZZY_MAX_LENGTH_DIFF: int = 4
 
 #: 三个固定电量分类，和 charge_budget.CATEGORY_FIXED_CHARGE 对上
 CATEGORY_AREA_PATROL = '区域巡防'
@@ -422,7 +428,53 @@ class PlanMapper:
         if candidates:
             return None, self._ambiguous_reason(entry, candidates)
 
+        # 4) 精确都没命中：用相似度再试一次。OCR 常把长名字截断，
+        #    实测「音擎能源模块」只读到「音擎能源」，精确匹配就会漏掉
+        fuzzy = self._fuzzy_lookup(name)
+        if fuzzy is not None:
+            log.info('条目「%s」没有精确匹配，按相似度当成「%s」处理', entry.entry_name, fuzzy.label)
+            return fuzzy, ''
+
         return None, f'「{entry.entry_name}」在副本表里找不到（可能是新版本条目），已跳过'
+
+    def _fuzzy_lookup(self, name: str) -> MissionTarget | None:
+        """精确匹配失败后，按相似度在两张索引里找最接近的一个。
+
+        只在「长度差不超过 FUZZY_MAX_LENGTH_DIFF」且「相似度不低于 FUZZY_CUTOFF」时才认，
+        避免把短名字配到毫不相关的长名字上。实测用途：OCR 把「音擎能源模块」读成
+        「音擎能源」时，精确匹配会漏，这里能补回来。
+
+        Args:
+            name: 归一化后的条目名
+
+        Returns:
+            最接近的副本目标；没有够像的返回 None
+        """
+        best_ratio: float = 0.0
+        best_target: MissionTarget | None = None
+
+        # 直配表（条目名就是材料名的那种，例如「音擎能源模块」）也要参与模糊匹配，
+        # 否则 OCR 截断成「音擎能源」时两条索引都查不到。
+        for rule_key, rule_target in _MATERIAL_ENTRY_RULES.items():
+            if abs(len(rule_key) - len(name)) > FUZZY_MAX_LENGTH_DIFF:
+                continue
+            ratio = difflib.SequenceMatcher(None, name, rule_key).ratio()
+            if ratio >= FUZZY_CUTOFF and ratio > best_ratio:
+                best_ratio = ratio
+                best_target = rule_target
+
+        for index in (self._by_mission_type, self._by_mission):
+            for key, target_list in index.items():
+                if not target_list:
+                    continue
+                if abs(len(key) - len(name)) > FUZZY_MAX_LENGTH_DIFF:
+                    continue
+                ratio = difflib.SequenceMatcher(None, name, key).ratio()
+                if ratio < FUZZY_CUTOFF or ratio <= best_ratio:
+                    continue
+                best_ratio = ratio
+                best_target = target_list[0]
+        return best_target
 
     def _group_allowed(self, entry: PlanEntry) -> bool:
         """这个分组要不要排。驱动盘默认不排：词条随机，没有「够不够」的判断标准。"""

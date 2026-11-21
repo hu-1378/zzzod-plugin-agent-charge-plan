@@ -94,10 +94,20 @@ class ReadAgentPlanList(ZOperation):
     @node_from(from_name='读角色名')
     @operation_node(name='回到顶部')
     def back_to_top(self) -> OperationRoundResult:
-        """一直往上拖，把清单滚回最顶上，保证每次读的都一样。"""
+        """往上拖到清单不再变化为止。
+
+        不固定拖几次：如果一进来就已经在最上面，拖一下画面不变就直接收工，
+        免得白拖 6 次、也免得在顶边反复蹭。
+        """
+        last_fingerprint = ''
         for _ in range(BACK_TO_TOP_TIMES):
             self._drag_plan_list(downward=False)
             time.sleep(SCROLL_SETTLE)
+            fingerprint = self._screen_fingerprint()
+            if fingerprint != '' and fingerprint == last_fingerprint:
+                log.info('往上拖画面没变化，已经到顶了')
+                break
+            last_fingerprint = fingerprint
         return self.round_success()
 
     @node_from(from_name='回到顶部')
@@ -124,15 +134,9 @@ class ReadAgentPlanList(ZOperation):
 
         if self.scroll_times > 0 and new_count == 0:
             if same_screen:
-                # 画面一个字都没变，说明这一下拖拽没生效（惯性/边界），再拖一次。
-                # 连着两次没变化才当成真的到底，否则会静默漏掉条目。
-                self.stuck_times += 1
-                if self.stuck_times >= 2:
-                    log.warning('连续两次滚动画面没变化，当成到底；如果实际还有条目，调大这里或改拖拽距离')
-                    return self.round_success(status='已经滚到底', data=self._make_snapshot())
-                self._drag_plan_list(downward=True)
-                self.scroll_times += 1
-                return self.round_wait(status='画面没变化，再滚一次', wait=SCROLL_WAIT)
+                # 画面一个字都没变：说明已经到底（拖不动了）。
+                # 只有「拖了但画面变了却没新条目」才需要继续往下，那种情况不在这里。
+                log.info('往下拖画面没变化，已经到底')
             return self.round_success(status='已经滚到底', data=self._make_snapshot())
 
         self.stuck_times = 0
@@ -142,6 +146,12 @@ class ReadAgentPlanList(ZOperation):
         self._drag_plan_list(downward=True)
         self.scroll_times += 1
         return self.round_wait(status=f'向下滚动第 {self.scroll_times} 次', wait=SCROLL_WAIT)
+
+    def _screen_fingerprint(self) -> str:
+        """清单区当前这一屏的文字指纹，用来判断「拖了之后画面有没有变」。"""
+        area: Rect = self._plan_list_rect()
+        block_list = agent_plan_page.read_text_blocks(self.ctx, self.last_screenshot, area)
+        return '|'.join(sorted(block.text for block in block_list))
 
     def _make_snapshot(self) -> AgentPlanSnapshot:
         """把读到的结果打包成外部要用的结构。"""
