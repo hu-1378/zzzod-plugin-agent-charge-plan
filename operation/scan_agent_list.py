@@ -42,7 +42,6 @@ import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from one_dragon.base.geometry.point import Point
 from one_dragon.base.geometry.rectangle import Rect
 from one_dragon.base.operation.operation_edge import node_from
 from one_dragon.base.operation.operation_node import operation_node
@@ -81,11 +80,16 @@ NAME_DEDUP_CUTOFF: float = 0.75
 #: 点按钮后等界面反应的时间（秒）
 CLICK_WAIT: float = 1.2
 #: 网格滚动后等画面停稳的时间（秒）
-SCROLL_WAIT: float = 0.8
+SCROLL_WAIT: float = 1.2
 #: 点完「关闭」后等弹窗收起来的时间（秒）
 CLOSE_WAIT: float = 1.0
 #: 回顶部时每次拖完等一下画面（秒）
 SCROLL_SETTLE: float = 0.3
+#: 竖向拖拽的起止比例（相对网格高度）。0.86 -> 0.14 相当于一次滚 72% 高度
+SCROLL_START_RATIO: float = 0.86
+SCROLL_END_RATIO: float = 0.14
+#: 拖拽全程耗时。原来用默认 0.5 秒拖 320px，游戏多半当成了点击，压根没滚
+SCROLL_DRAG_SECONDS: float = 0.9
 
 #: 节点状态：名单读完了（滚到没有新名字）
 STATUS_NAMES_READ: str = '名单读完'
@@ -416,13 +420,14 @@ class ScanAgentList(ZOperation):
             area: 代理人网格区域
             downward: True 看后面的代理人（手指从下往上滑），False 回顶部
         """
-        x: int = area.center.x
-        top: Point = Point(x, area.y1 + GRID_SCROLL_MARGIN)
-        bottom: Point = Point(x, area.y2 - GRID_SCROLL_MARGIN)
-        if downward:
-            self.ctx.controller.drag_to(start=bottom, end=top)
-        else:
-            self.ctx.controller.drag_to(start=top, end=bottom)
+        screen_areas.scroll_rect(
+            self.ctx,
+            area,
+            direction='down' if downward else 'up',
+            start_ratio=SCROLL_START_RATIO,
+            end_ratio=SCROLL_END_RATIO,
+            duration=SCROLL_DRAG_SECONDS,
+        )
 
     def _close_dialog(self) -> None:
         """点弹窗右上角的红 X。
