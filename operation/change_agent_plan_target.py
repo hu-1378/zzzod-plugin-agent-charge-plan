@@ -119,18 +119,36 @@ class ChangeAgentPlanTarget(ZOperation):
 
     @node_from(from_name='读取当前目标', status=STATUS_NEED_CLEAR)
     @node_from(from_name='读取当前目标', status=STATUS_NEED_CHANGE)
-    @operation_node(name='打开更换弹窗', node_max_retry_times=5)
+    @operation_node(name='打开更换弹窗', node_max_retry_times=8)
     def open_dialog(self) -> OperationRoundResult:
-        """点角色卡上的「更换特训目标」打开弹窗。弹窗已经开着就直接过。"""
+        """点角色卡上的「更换特训目标」打开弹窗，等网格真的渲染出来再往下走。
+
+        只看到标题不够：实测标题出来时网格还是空的，OCR 读不到任何名字，
+        下一步就会「没看到 xxx」然后在特训目标页上乱滚两次。
+        """
         branch_status = STATUS_NEED_CLEAR if not self.target_agent_name else STATUS_NEED_CHANGE
         if self._is_dialog_open():
-            return self.round_success(status=branch_status)
+            if self._dialog_has_content():
+                return self.round_success(status=branch_status)
+            return self.round_wait(status='弹窗已开，等网格渲染', wait=1)
 
         rect: Rect = screen_areas.get_area_rect(
             self.ctx, screen_areas.COMPENDIUM_SCREEN, screen_areas.AREA_CHANGE_TARGET
         )
         self.ctx.controller.click(rect.center)
         return self.round_wait(status='点击更换特训目标', wait=CLICK_WAIT)
+
+    def _dialog_has_content(self) -> bool:
+        """弹窗网格里能不能读出至少一个代理人名字。
+
+        Returns:
+            读到名字就是 True
+        """
+        area = self._dialog_area(AREA_AGENT_GRID)
+        if area is None:
+            return False
+        block_list = agent_plan_page.read_text_blocks(self.ctx, self.last_screenshot, area)
+        return len(agent_plan_page.parse_dialog_agents_by_grid(block_list, area)) > 0
 
     @node_from(from_name='打开更换弹窗', status=STATUS_NEED_CLEAR)
     @operation_node(name='点清除目标', node_max_retry_times=5)
